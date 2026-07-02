@@ -162,10 +162,7 @@ function getManifest() {
 async function getHome(ctx) {
   const html = await safeFetch(ctx, entryURL(ctx), baseURL(ctx) + '/');
   const hero = parseCards(sectionBlock(html, '推荐给你'), '推荐给你', ctx).slice(0, 10).map(toWideItem);
-  const parsedSections = parseHomeSections(ctx, html);
-  const mediaSections = parsedSections.length ? parsedSections : MISSAV_SECTIONS.map(function (section) {
-    return sectionShell(ctx, section);
-  });
+  const mediaSections = homeMediaSections(ctx, parseHomeSections(ctx, html));
   const sections = [primaryCategoriesSection(ctx)].concat(mediaSections);
 
   return {
@@ -176,6 +173,22 @@ async function getHome(ctx) {
     hero: hero,
     sections: sections
   };
+}
+
+function homeMediaSections(ctx, parsedSections) {
+  const sections = [];
+  const seen = {};
+  (parsedSections || []).forEach(function (section) {
+    if (!section || !section.id || seen[section.id]) return;
+    seen[section.id] = true;
+    sections.push(section);
+  });
+  MISSAV_SECTIONS.forEach(function (section) {
+    if (seen[section.id]) return;
+    seen[section.id] = true;
+    sections.push(sectionShell(ctx, section));
+  });
+  return sections;
 }
 
 function primaryCategoriesSection(ctx) {
@@ -214,7 +227,7 @@ async function getHomeSection(ctx) {
   const section = findSection(sectionId) || MISSAV_SECTIONS[0];
   const url = categoryURL(ctx, section.path);
   try {
-    const html = await fetchText(ctx, url);
+    const html = await fetchText(ctx, url, entryURL(ctx));
     return {
       id: section.id,
       title: section.title,
@@ -237,7 +250,7 @@ async function getCategory(ctx) {
   const url = pagedURL(categoryURL(ctx, path), page);
   let html = '';
   try {
-    html = await fetchText(ctx, url);
+    html = await fetchText(ctx, url, entryURL(ctx));
   } catch (error) {
     return verificationCategory(ctx, pageId, section ? section.title : primary ? primary.title : '需要验证', url, error, page);
   }
@@ -263,7 +276,7 @@ async function getDetail(ctx) {
 
   let html = '';
   try {
-    html = await fetchText(ctx, detailURL);
+    html = await fetchText(ctx, detailURL, entryURL(ctx));
   } catch (error) {
     return verificationDetail(ctx, detailURL, error);
   }
@@ -364,7 +377,7 @@ async function getResourceVersions(ctx) {
   const direct = playUrlFromContext(ctx);
   if (direct) return playbackGroups(detailURL, title, direct, ctx);
   try {
-    const html = await fetchText(ctx, detailURL);
+    const html = await fetchText(ctx, detailURL, entryURL(ctx));
     return playbackGroups(detailURL, title, extractPlayableURL(html), ctx);
   } catch (error) {
     return playbackGroups(detailURL, title, '', ctx);
@@ -379,7 +392,7 @@ async function resolvePlayback(ctx) {
 
   const detailURL = detailUrlFromContext(ctx);
   if (!detailURL) throw new Error('MissAV 播放参数无效');
-  const html = await fetchText(ctx, detailURL);
+  const html = await fetchText(ctx, detailURL, entryURL(ctx));
   const url = firstNonEmpty(
     extractPlayableURL(html),
     await extractPlayableFromLinkedPlayers(ctx, html, detailURL),
@@ -443,7 +456,7 @@ async function search(ctx) {
   const url = pagedURL(categoryURL(ctx, '/search/' + encodeURIComponent(query.replace(/\\/g, ''))), page);
   let html = '';
   try {
-    html = await fetchText(ctx, url);
+    html = await fetchText(ctx, url, entryURL(ctx));
   } catch (error) {
     return {
       pageType: 'search',
@@ -495,7 +508,7 @@ async function extractPlayableFromLinkedPlayers(ctx, html, referer) {
   const urls = extractPlayerURLs(ctx, html, referer);
   for (let index = 0; index < urls.length; index += 1) {
     try {
-      const playerHTML = await fetchText(ctx, urls[index]);
+      const playerHTML = await fetchText(ctx, urls[index], referer);
       const playable = extractPlayableURL(playerHTML);
       if (playable) return playable;
     } catch (error) {
@@ -576,7 +589,7 @@ function pagedURL(url, page) {
   return url + (url.indexOf('?') >= 0 ? '&' : '?') + 'page=' + page;
 }
 
-async function fetchText(ctx, url) {
+async function fetchText(ctx, url, referer) {
   const cached = getCachedText(ctx, url);
   if (cached) return cached;
 
@@ -584,8 +597,9 @@ async function fetchText(ctx, url) {
   let lastError = null;
   for (let index = 0; index < urls.length; index += 1) {
     const currentURL = urls[index];
+    const requestReferer = referer || entryURL(ctx);
     try {
-      const response = await httpGet(currentURL, requestOptions(ctx, currentURL));
+      const response = await httpGet(currentURL, requestOptions(ctx, requestReferer));
       const text = responseText(response);
       if (isUsableHTML(text, response && response.status, response && response.headers)) {
         setCachedText(ctx, currentURL, text);
@@ -593,7 +607,7 @@ async function fetchText(ctx, url) {
         return text;
       }
       if (isCloudflare(text, response && response.status, response && response.headers)) {
-        const browserText = await browserHTML(ctx, currentURL, currentURL);
+        const browserText = await browserHTML(ctx, currentURL, requestReferer);
         if (isUsableHTML(browserText)) {
           setCachedText(ctx, currentURL, browserText);
           if (currentURL !== url) setCachedText(ctx, url, browserText);
@@ -603,7 +617,7 @@ async function fetchText(ctx, url) {
       lastError = new Error('HTTP ' + (response && response.status ? response.status : 'empty') + ' ' + currentURL);
     } catch (error) {
       lastError = error;
-      const browserText = await browserHTML(ctx, currentURL, currentURL);
+      const browserText = await browserHTML(ctx, currentURL, requestReferer);
       if (isUsableHTML(browserText)) {
         setCachedText(ctx, currentURL, browserText);
         if (currentURL !== url) setCachedText(ctx, url, browserText);
@@ -731,13 +745,47 @@ function candidateURLs(ctx, url) {
   const urls = [input];
   const origin = originOf(input);
   const path = input.replace(/^https?:\/\/[^/]+/i, '');
+  candidatePathVariants(ctx, path).forEach(function (variant) {
+    const next = origin + variant;
+    if (urls.indexOf(next) < 0) urls.push(next);
+  });
   backupBaseURLs(ctx).forEach(function (base) {
     const root = base.replace(/\/+$/, '');
     if (!root || root === origin) return;
-    const next = root + (path[0] === '/' ? path : '/' + path);
-    if (urls.indexOf(next) < 0) urls.push(next);
+    candidatePathVariants(ctx, path).forEach(function (variant) {
+      const next = root + variant;
+      if (urls.indexOf(next) < 0) urls.push(next);
+    });
   });
   return urls.filter(Boolean);
+}
+
+function candidatePathVariants(ctx, path) {
+  const value = path && path[0] === '/' ? path : '/' + stringValue(path);
+  const variants = [value];
+  if (!isKnownCategoryPath(value)) return variants;
+  const match = value.match(/^\/(?:dm\d+\/)?cn(\/[^?#]*)([?#].*)?$/i);
+  if (match) {
+    const suffix = match[1] || '';
+    const query = match[2] || '';
+    const cnPath = '/cn' + suffix + query;
+    const rootPath = suffix + query;
+    if (variants.indexOf(cnPath) < 0) variants.push(cnPath);
+    if (variants.indexOf(rootPath) < 0) variants.push(rootPath);
+  } else {
+    const localePath = localePrefix(ctx) + value;
+    const cnPath = '/cn' + value;
+    if (variants.indexOf(localePath) < 0) variants.push(localePath);
+    if (variants.indexOf(cnPath) < 0) variants.push(cnPath);
+  }
+  return variants;
+}
+
+function isKnownCategoryPath(path) {
+  const clean = String(path || '').split(/[?#]/)[0].replace(/^\/(?:dm\d+\/)?cn/i, '') || '/';
+  return MISSAV_SECTIONS.concat(MISSAV_PRIMARY_CATEGORIES).some(function (item) {
+    return clean === item.path || clean === item.path.split('?')[0];
+  });
 }
 
 function backupBaseURLs(ctx) {
@@ -851,7 +899,7 @@ function parseHomeSections(ctx, html) {
     const predefined = findSection(title);
     sections.push({
       id: predefined ? predefined.id : 'missav-home-' + index,
-      title: title,
+      title: predefined ? predefined.title : title,
       style: predefined ? predefined.style : sectionStyle(title),
       moreAction: predefined ? categoryAction(ctx, predefined) : undefined,
       items: items
