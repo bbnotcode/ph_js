@@ -2,6 +2,8 @@
 
 const XXXFOLLOW_BASE = 'https://www.xxxfollow.com';
 const XXXFOLLOW_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36';
+// 标签页项目可能不在首页 feed 中；保存已解析的直链，供详情页播放回调复用。
+const XXXFOLLOW_VIDEO_CACHE = Object.create(null);
 const XXXFOLLOW_TAGS = [
   ['asian', '亚洲'], ['bigass', '大屁股'], ['bigtits', '巨乳'], ['blowjob', '口交'],
   ['brunette', '棕发'], ['smalltits', '贫乳'], ['creampie', '内射'], ['ebony', '黑人'],
@@ -76,6 +78,10 @@ async function getResourceVersions(ctx) {
 async function resolvePlayback(ctx) {
   let url = directURL(ctx);
   let item;
+  if (!url) {
+    const cachedId = normalizeItemId(ctx);
+    url = cachedId && XXXFOLLOW_VIDEO_CACHE[cachedId];
+  }
   if (!url) { item = await findItem(ctx); url = item && item.videoUrl; }
   if (!url) throw new Error('没有解析到 XXXFollow 播放地址');
   return { url: decodeURL(url), container: /\.m3u8(?:$|[?#])/i.test(url) ? 'm3u8' : 'mp4', headers: mediaHeaders(ctx), startPositionSeconds: 0, isLive: false, streamKind: /\.m3u8(?:$|[?#])/i.test(url) ? 'hls' : 'file' };
@@ -95,7 +101,17 @@ function getPlayback(ctx) { return resolvePlayback(ctx); }
 
 async function findItem(ctx) {
   const givenURL = directURL(ctx);
-  const id = stringValue(ctx && (ctx.itemId || ctx.id || ctx.link || ctx.videoId));
+  const id = normalizeItemId(ctx);
+  const embedded = playbackPayload(rawPlaybackId(ctx));
+  if (embedded.url) return {
+    id: embedded.id || id,
+    sourceId: embedded.id || id,
+    videoUrl: embedded.url,
+    poster: embedded.poster || stringValue(ctx && (ctx.poster || ctx.backdrop)),
+    backdrop: embedded.poster || stringValue(ctx && (ctx.backdrop || ctx.poster)),
+    title: embedded.title || stringValue(ctx && ctx.title) || id
+  };
+  if (id && XXXFOLLOW_VIDEO_CACHE[id]) return { id: id, videoUrl: XXXFOLLOW_VIDEO_CACHE[id], title: stringValue(ctx && ctx.title) || id };
   if (givenURL && id && !/^https?:\/\//i.test(id)) return { id: id, videoUrl: givenURL, title: stringValue(ctx.title) || id };
   const html = await fetchText(ctx, baseURL(ctx));
   const state = extractPreloadState(html);
@@ -114,7 +130,9 @@ function detailObject(ctx, item) {
 }
 
 function resourceGroups(ctx, item) {
-  return [{ id: 'online', title: '在线播放', versions: [{ id: 'default-' + item.id, name: '默认线路', subtitle: item.videoUrl ? '高清直链' : '详情页解析', url: item.videoUrl || undefined, container: /\.m3u8/i.test(item.videoUrl || '') ? 'm3u8' : 'mp4', default: true, headers: mediaHeaders(ctx), action: { type: 'play', itemId: item.id, versionId: 'default-' + item.id, url: item.videoUrl || undefined, title: item.title } }] }];
+  const sourceId = item.sourceId || playbackPayload(item.id).id || item.id;
+  const payload = makePlaybackPayload(sourceId, item.videoUrl, item.poster || item.backdrop, item.title);
+  return [{ id: 'online', title: '在线播放', versions: [{ id: payload, name: '默认线路', subtitle: item.videoUrl ? '高清直链' : '详情页解析', url: item.videoUrl || undefined, container: /\.m3u8/i.test(item.videoUrl || '') ? 'm3u8' : 'mp4', default: true, headers: mediaHeaders(ctx), action: { type: 'play', itemId: payload, versionId: payload, url: item.videoUrl || undefined, playUrl: item.videoUrl || undefined, videoUrl: item.videoUrl || undefined, title: item.title } }] }];
 }
 
 async function loadFeed(ctx, tag, page) { return parsePreloadItems(ctx, await fetchText(ctx, feedURL(ctx, tag, page))); }
@@ -135,10 +153,64 @@ function parseItem(ctx, item) {
   const id = String(post.slug || post.id || ''); if (!id) return null; const video = first.fhd_url || first.uhd_url || first.url || first.sd_url || '';
   const poster = absolute(ctx, first.thumb_url || first.start_url || ''); const tags = Array.isArray(post.tags) ? post.tags : [];
   const genres = tags.map(function (t) { return clean(t && (t.display || t.tag)); }).filter(Boolean);
-  return { id: id, title: clean(post.text || 'Video ' + id).slice(0, 120), poster: poster, backdrop: poster, videoUrl: decodeURL(video), duration: Number(first.duration_in_second || 0), rating: Math.min(10, Math.round(Number(item.like_count || 0) / 2000)), genres: genres, overview: clean(post.text || ''), action: { type: 'detail', itemId: id, id: id, title: clean(post.text || id) } };
+  const videoUrl = decodeURL(video);
+  if (id && videoUrl) XXXFOLLOW_VIDEO_CACHE[id] = videoUrl;
+  const payload = makePlaybackPayload(id, videoUrl, poster, clean(post.text || id));
+  return { id: payload, sourceId: id, title: clean(post.text || 'Video ' + id).slice(0, 120), poster: poster, backdrop: poster, videoUrl: videoUrl, duration: Number(first.duration_in_second || 0), rating: Math.min(10, Math.round(Number(item.like_count || 0) / 2000)), genres: genres, overview: clean(post.text || ''), action: { type: 'detail', itemId: payload, id: payload, title: clean(post.text || id), url: videoUrl, playUrl: videoUrl, videoUrl: videoUrl } };
 }
 
-function directURL(ctx) { const values = ctx ? [ctx.playUrl, ctx.videoUrl, ctx.mediaUrl, ctx.streamUrl, ctx.url, ctx.src] : []; for (let i = 0; i < values.length; i += 1) if (/\.(?:mp4|m3u8|webm|mov)(?:$|[?#])/i.test(String(values[i]))) return String(values[i]); return ''; }
+function normalizeItemId(ctx) {
+  if (!ctx) return '';
+  const raw = rawPlaybackId(ctx);
+  if (raw && typeof raw === 'object') return playbackPayload(raw.itemId || raw.id || raw.slug || raw.videoId).id;
+  return playbackPayload(raw).id;
+}
+function rawPlaybackId(ctx) {
+  if (!ctx) return '';
+  return contextValue(ctx, 'itemId') || contextValue(ctx, 'episodeId') || contextValue(ctx, 'id') || contextValue(ctx, 'link') || contextValue(ctx, 'videoId') || contextValue(ctx, 'versionId');
+}
+function makePlaybackPayload(id, url, poster, title) {
+  if (!url) return stringValue(id);
+  let payload = 'xxxfollow://play?id=' + encodeURIComponent(stringValue(id)) + '&url=' + encodeURIComponent(decodeURL(url));
+  if (poster) payload += '&poster=' + encodeURIComponent(stringValue(poster));
+  if (title) payload += '&title=' + encodeURIComponent(stringValue(title));
+  return payload;
+}
+function playbackPayload(value) {
+  const raw = stringValue(value).replace(/^default-/, '');
+  if (raw.indexOf('xxxfollow://play?') !== 0) return { id: raw, url: '', poster: '', title: '' };
+  const query = raw.slice(raw.indexOf('?') + 1).split('&');
+  const result = { id: '', url: '', poster: '', title: '' };
+  query.forEach(function (part) {
+    const index = part.indexOf('=');
+    if (index < 0) return;
+    const key = part.slice(0, index);
+    let value = part.slice(index + 1);
+    try { value = decodeURIComponent(value); } catch (_) {}
+    if (key === 'id') result.id = value;
+    if (key === 'url') result.url = value;
+    if (key === 'poster') result.poster = value;
+    if (key === 'title') result.title = value;
+  });
+  return result;
+}
+function directURL(ctx) {
+  const values = ctx ? [
+    contextValue(ctx, 'playUrl'), contextValue(ctx, 'videoUrl'), contextValue(ctx, 'mediaUrl'),
+    contextValue(ctx, 'streamUrl'), contextValue(ctx, 'url'), contextValue(ctx, 'src'),
+    ctx.resource && (ctx.resource.url || ctx.resource.playUrl || ctx.resource.videoUrl),
+    ctx.version && (ctx.version.url || ctx.version.playUrl || ctx.version.videoUrl),
+    ctx.item && (ctx.item.url || ctx.item.playUrl || ctx.item.videoUrl),
+    contextValue(ctx, 'itemId'), contextValue(ctx, 'episodeId'), contextValue(ctx, 'versionId'), contextValue(ctx, 'id')
+  ] : [];
+  for (let i = 0; i < values.length; i += 1) {
+    const value = stringValue(values[i]);
+    const embedded = playbackPayload(value).url;
+    if (embedded) return embedded;
+    if (/\.(?:mp4|m3u8|webm|mov)(?:$|[?#])/i.test(value)) return value;
+  }
+  return '';
+}
 function baseURL(ctx) { return stringValue(contextValue(ctx, 'baseURL') || XXXFOLLOW_BASE).replace(/\/+$/, '') || XXXFOLLOW_BASE; }
 function absolute(ctx, url) { url = stringValue(url); if (!url) return ''; if (/^https?:\/\//i.test(url)) return url; if (url.indexOf('//') === 0) return 'https:' + url; return baseURL(ctx) + (url.charAt(0) === '/' ? url : '/' + url); }
 function decodeURL(url) { return stringValue(url).replace(/\\\//g, '/').replace(/&amp;/g, '&'); }
