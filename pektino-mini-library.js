@@ -1,19 +1,16 @@
 // @name Pektino DreamBy Mini Library
-
 const PEKTINO_BASE = 'https://pektino.com';
 const PEKTINO_LOCALE = '/zh-CN';
 const PEKTINO_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36';
-
 const WidgetMetadata = {
   id: 'pektino-twitter-video',
   name: 'Twitter 视频排行榜',
   title: 'Twitter 视频排行榜',
-  version: '1.0.1',
+  version: '1.0.2',
   author: 'Codex',
   site: PEKTINO_BASE + PEKTINO_LOCALE,
   description: 'Pektino X(Twitter) 视频排行榜 DreamBy 自定义媒体库。'
 };
-
 const RANKS = [
   { id: 'daily', title: '每日', path: '/', style: 'discover.ranked' },
   { id: 'weekly', title: '每周', path: '/weekly', style: 'discover.ranked' },
@@ -21,14 +18,12 @@ const RANKS = [
   { id: 'all', title: '所有时间', path: '/all', style: 'discover.ranked' },
   { id: 'favorite', title: '我所喜爱的', path: '/favorite', style: 'discover.standard' }
 ];
-
 const SORTS = [
   { id: 'favorite', title: '按点赞', value: 'favorite' },
-  { id: 'view', title: '按观看数', value: 'view' },
-  { id: 'duration', title: '按时长', value: 'duration' },
-  { id: 'latest', title: '最近添加', value: 'latest' }
+  { id: 'pv', title: '按观看数', value: 'pv' },
+  { id: 'time', title: '按时长', value: 'time' },
+  { id: 'created', title: '最近添加', value: 'created' }
 ];
-
 function getManifest() {
   return {
     ...WidgetMetadata,
@@ -40,14 +35,12 @@ function getManifest() {
     ]
   };
 }
-
 async function getHome() {
   return {
     pageType: 'home', id: 'pektino-home', title: WidgetMetadata.title, heroAspectRatio: '16:9', hero: [],
     sections: RANKS.map(r => ({ id: r.id, title: r.title, style: r.style, lazy: true, items: [], moreAction: categoryAction(r) }))
   };
 }
-
 async function getHomeSection(ctx) {
   const rank = rankOf(ctx && (ctx.sectionId || ctx.id));
   try {
@@ -57,18 +50,23 @@ async function getHomeSection(ctx) {
     return { id: rank.id, title: rank.title, style: rank.style, lazy: false, items: [], subtitle: errorMessage(error) };
   }
 }
-
 async function getCategory(ctx) {
   const rank = rankOf(ctx && (ctx.pageId || ctx.id));
   const page = positiveInt(value(ctx, 'page'), 1);
-  const sort = string(value(ctx, 'sort') || value(ctx, 'sortBy') || value(ctx, 'sort_by') || 'favorite');
+  const sort = normalizeSort(first(
+    value(ctx, 'sort'),
+    value(ctx, 'sortValue'),
+    value(ctx, 'selectedSortValue'),
+    value(ctx, 'sortBy'),
+    value(ctx, 'sort_by'),
+    'favorite'
+  ));
   const result = await fetchRank(ctx, rank, page, sort);
   return {
     pageType: 'category', id: rank.id, title: rank.title, style: 'media.posterGrid', itemAspectRatio: '16:9',
     items: result.items, page, hasMore: result.hasMore, selectedSortValue: sort, sort: SORTS
   };
 }
-
 async function getDetail(ctx) {
   const id = movieId(ctx);
   if (!id) throw new Error('Pektino 详情参数无效');
@@ -84,7 +82,6 @@ async function getDetail(ctx) {
     recommendations: [{ id: 'related', title: '相关视频', style: 'discover.standard', items: data.related }]
   };
 }
-
 async function getResourceVersions(ctx) {
   const payload = decode(ctx && (ctx.versionId || ctx.episodeId));
   const id = first(payload.id, movieId(ctx));
@@ -100,7 +97,6 @@ async function getResourceVersions(ctx) {
   const versionId = encode({ id, url: playURL, title, poster, referer });
   return [{ id: 'direct', title: 'Twitter 原始视频', versions: [{ id: versionId, title: '原画 MP4', name: '原画 MP4', url: playURL, container: containerOf(playURL), headers: playbackHeaders(), default: true }] }];
 }
-
 async function resolvePlayback(ctx) {
   const payload = decode(first(ctx && ctx.versionId, ctx && ctx.episodeId, ctx && ctx.itemId, ctx && ctx.id));
   const id = first(payload.id, movieId(ctx));
@@ -109,7 +105,6 @@ async function resolvePlayback(ctx) {
   if (!/^https?:\/\//i.test(string(url))) throw new Error('未解析到 Pektino 播放地址');
   return { url, container: containerOf(url), headers: playbackHeaders(), startPositionSeconds: 0, isLive: false, streamKind: 'vod' };
 }
-
 async function fetchRank(ctx, rank, page, sort) {
   const params = ['sort=' + encodeURIComponent(sort), 'page=' + page];
   const url = site(ctx) + PEKTINO_LOCALE + rank.path + '?' + params.join('&');
@@ -117,7 +112,6 @@ async function fetchRank(ctx, rank, page, sort) {
   const items = parseCards(html, ctx);
   return { items, hasMore: hasNext(html, page) };
 }
-
 function parseCards(html, ctx) {
   const out = [], seen = new Set();
   const re = /<a\b[^>]*href=["']([^"']*\/movie\/([^"'/?#]+))[^"']*["'][^>]*>([\s\S]*?)<\/a>/gi;
@@ -135,7 +129,6 @@ function parseCards(html, ctx) {
   }
   return out;
 }
-
 function parseDetail(html, id, ctx) {
   const mp4 = firstMatch(html, /https:\/\/video\.twimg\.com\/[^"'<>\\]+?\.mp4(?:\?[^"'<>\\]*)?/i);
   const videoSrc = firstMatch(html, /<(?:video|source)\b[^>]*\bsrc=["']([^"']+)/i);
@@ -146,7 +139,6 @@ function parseDetail(html, id, ctx) {
   const relatedBlock = (html.match(/相关视频[\s\S]*?(?:评论|如何保存|<footer)/i) || [''])[0];
   return { id, title: cleanTitle(titleRaw, id), poster, playURL, portrait: /padding-bottom:\s*177/i.test(html), views: '', favorites: '', overview: '来自 Pektino 的 X(Twitter) 视频。', related: parseCards(relatedBlock, ctx).slice(0, 18) };
 }
-
 async function fetchText(ctx, url) {
   const headers = requestHeaders(ctx, url);
   let response;
@@ -156,11 +148,14 @@ async function fetchText(ctx, url) {
   const body = response && (response.data !== undefined ? response.data : response.body !== undefined ? response.body : response);
   return typeof body === 'string' ? body : JSON.stringify(body || '');
 }
-
 function requestHeaders(ctx, referer) { const h = { 'User-Agent': PEKTINO_UA, Accept: 'text/html,application/xhtml+xml', 'Accept-Language': 'zh-CN,zh;q=0.9', Referer: referer || site(ctx) + PEKTINO_LOCALE + '/' }; const c = string(value(ctx, 'cookie')); if (c) h.Cookie = c; return h; }
 function imageHeaders() { return { Referer: 'https://pektino.com/', 'User-Agent': PEKTINO_UA }; }
 function playbackHeaders() { return { Referer: 'https://x.com/', Origin: 'https://x.com', 'User-Agent': PEKTINO_UA, Accept: 'video/avc,video/mp4,video/*;q=0.9,*/*;q=0.8' }; }
 function rankOf(id) { return RANKS.find(r => r.id === string(id)) || RANKS[0]; }
+function normalizeSort(sort) {
+  const aliases = { view: 'pv', views: 'pv', duration: 'time', latest: 'created', favorite: 'favorite', pv: 'pv', time: 'time', created: 'created' };
+  return aliases[string(sort)] || 'favorite';
+}
 function categoryAction(r) { return { type: 'category', pageId: r.id, title: r.title, itemAspectRatio: '16:9' }; }
 function site(ctx) { return string(value(ctx, 'baseURL') || PEKTINO_BASE).replace(/\/+$/, ''); }
 function movieURL(ctx, id) { return site(ctx) + PEKTINO_LOCALE + '/movie/' + encodeURIComponent(id); }
@@ -181,7 +176,6 @@ function positiveInt(v, fallback) { const n = parseInt(v, 10); return Number.isF
 function encode(obj) { try { return 'pektino://' + encodeURIComponent(JSON.stringify(obj)); } catch (_) { return ''; } }
 function decode(v) { const s = string(v); if (!s.startsWith('pektino://')) return {}; try { return JSON.parse(decodeURIComponent(s.slice(10))); } catch (_) { return {}; } }
 function errorMessage(e) { return e && e.message ? e.message : string(e) || '加载失败'; }
-
 const api = { WidgetMetadata, getManifest, getHome, getHomeSection, getCategory, getDetail, getResourceVersions, resolvePlayback, play: resolvePlayback, getPlayback: resolvePlayback };
 if (typeof globalThis !== 'undefined') Object.assign(globalThis, api);
 if (typeof module !== 'undefined' && module.exports) module.exports = api;
