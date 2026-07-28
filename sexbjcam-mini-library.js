@@ -9,7 +9,7 @@ const WidgetMetadata = {
   id: 'sexbjcam-mini-library',
   name: 'SexBJCam',
   title: 'SexBJCam',
-  version: '1.1.5',
+  version: '1.1.6',
   author: 'Alan huang',
   logo: SEXBJCAM_LOGO,
   icon: SEXBJCAM_LOGO,
@@ -332,7 +332,9 @@ function buildQualityVersions(detailURL, title, embedURL, headers, variants) {
       id: qualityId,
       name: variant.height + 'P',
       title: variant.height + 'P',
-      subtitle: index === 0 ? '最高画质 · 默认' : (variant.bandwidth ? formatBitrate(variant.bandwidth) : ''),
+      subtitle: index === 0
+        ? '最高画质 · 默认 · 切换时请稍候'
+        : [variant.bandwidth ? formatBitrate(variant.bandwidth) : '', '切换时请稍候'].filter(Boolean).join(' · '),
       quality: variant.height + 'P',
       container: 'm3u8',
       default: index === 0,
