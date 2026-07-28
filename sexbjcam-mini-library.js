@@ -9,8 +9,8 @@ const WidgetMetadata = {
   id: 'sexbjcam-mini-library',
   name: 'SexBJCam',
   title: 'SexBJCam',
-  version: '1.1.3',
-  author: 'EL',
+  version: '1.1.6',
+  author: 'Alan huang',
   logo: SEXBJCAM_LOGO,
   icon: SEXBJCAM_LOGO,
   site: SEXBJCAM_DEFAULT_BASE,
@@ -24,6 +24,7 @@ const SEXBJCAM_SECTIONS = [
   { id: 'chinese-girl', title: 'Chinese Girl', path: '/category/chinese-gril/', style: 'discover.standard' }
 ];
 let SEXBJCAM_REQUEST_NONCE = 0;
+const SEXBJCAM_QUALITY_CACHE = {};
 
 function getManifest() {
   return {
@@ -300,20 +301,40 @@ function resourceGroupsFor(ctx, detailURL, title, embedURL) {
 }
 
 async function loadQualityVersions(ctx, detailURL, title, embedURL) {
-  const playerHTML = await fetchPlayerText(ctx, embedURL);
-  const masterURL = extractMediaURL(playerHTML, embedURL);
-  if (!masterURL) return [];
-  const headers = { Referer: embedURL, Origin: urlOrigin(embedURL), 'User-Agent': SEXBJCAM_UA };
-  const manifest = await fetchSignedManifestText(ctx, masterURL, headers);
-  const variants = parseHlsVariants(manifest, masterURL);
+  let variants = [];
+  let headers = { Referer: embedURL, Origin: urlOrigin(embedURL), 'User-Agent': SEXBJCAM_UA };
+  for (let attempt = 0; attempt < 3 && !variants.length; attempt += 1) {
+    try {
+      const playerHTML = await fetchPlayerText(ctx, embedURL);
+      const masterURL = extractMediaURL(playerHTML, embedURL);
+      if (!masterURL) continue;
+      const manifest = await fetchSignedManifestText(ctx, masterURL, headers);
+      variants = parseHlsVariants(manifest, masterURL);
+    } catch (_) {
+      variants = [];
+    }
+  }
+  if (variants.length) {
+    SEXBJCAM_QUALITY_CACHE[embedURL] = variants.map(function (variant) {
+      return { height: variant.height, bandwidth: variant.bandwidth || 0 };
+    });
+  } else if (SEXBJCAM_QUALITY_CACHE[embedURL]) {
+    variants = SEXBJCAM_QUALITY_CACHE[embedURL].slice();
+  }
   if (!variants.length) return [];
+  return buildQualityVersions(detailURL, title, embedURL, headers, variants);
+}
+
+function buildQualityVersions(detailURL, title, embedURL, headers, variants) {
   return variants.map(function (variant, index) {
     const qualityId = 'quality:' + variant.height;
     return {
       id: qualityId,
       name: variant.height + 'P',
       title: variant.height + 'P',
-      subtitle: index === 0 ? '最高画质 · 默认' : (variant.bandwidth ? formatBitrate(variant.bandwidth) : ''),
+      subtitle: index === 0
+        ? '最高画质 · 默认 · 切换时请稍候'
+        : [variant.bandwidth ? formatBitrate(variant.bandwidth) : '', '切换时请稍候'].filter(Boolean).join(' · '),
       quality: variant.height + 'P',
       container: 'm3u8',
       default: index === 0,
@@ -424,10 +445,10 @@ async function fetchPlayerText(ctx, url) {
         waitForMediaSource: true,
         headers: freshHeaders
       });
-      const mediaURL = mediaURLFromBrowserResult(result);
-      if (mediaURL) return mediaURL;
       const browserText = unwrapText(result);
       if (browserText && extractMediaURL(browserText, url)) return browserText;
+      const mediaURL = mediaURLFromBrowserResult(result);
+      if (mediaURL) return mediaURL;
     } catch (_) {}
   }
   let normalError = null;
@@ -481,7 +502,17 @@ function mediaURLFromBrowserResult(result) {
     }
   }
   for (let i = 0; i < candidates.length; i += 1) if (/\/master\.m3u8(?:$|[?#])/i.test(candidates[i])) return candidates[i];
+  for (let i = 0; i < candidates.length; i += 1) {
+    const masterURL = masterURLFromVariant(candidates[i]);
+    if (masterURL) return masterURL;
+  }
   return candidates[0] || '';
+}
+
+function masterURLFromVariant(url) {
+  const value = stringValue(url);
+  if (!/\/index-[^/?#]+\.m3u8(?:$|[?#])/i.test(value)) return '';
+  return value.replace(/\/index-[^/?#]+\.m3u8(?=[$?#])/i, '/master.m3u8');
 }
 
 function cacheBustedURL(url) {
