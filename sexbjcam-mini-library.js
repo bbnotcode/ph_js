@@ -9,7 +9,7 @@ const WidgetMetadata = {
   id: 'sexbjcam-mini-library',
   name: 'SexBJCam',
   title: 'SexBJCam',
-  version: '1.1.3',
+  version: '1.1.4',
   author: 'EL',
   logo: SEXBJCAM_LOGO,
   icon: SEXBJCAM_LOGO,
@@ -24,6 +24,7 @@ const SEXBJCAM_SECTIONS = [
   { id: 'chinese-girl', title: 'Chinese Girl', path: '/category/chinese-gril/', style: 'discover.standard' }
 ];
 let SEXBJCAM_REQUEST_NONCE = 0;
+const SEXBJCAM_QUALITY_CACHE = {};
 
 function getManifest() {
   return {
@@ -300,13 +301,31 @@ function resourceGroupsFor(ctx, detailURL, title, embedURL) {
 }
 
 async function loadQualityVersions(ctx, detailURL, title, embedURL) {
-  const playerHTML = await fetchPlayerText(ctx, embedURL);
-  const masterURL = extractMediaURL(playerHTML, embedURL);
-  if (!masterURL) return [];
-  const headers = { Referer: embedURL, Origin: urlOrigin(embedURL), 'User-Agent': SEXBJCAM_UA };
-  const manifest = await fetchSignedManifestText(ctx, masterURL, headers);
-  const variants = parseHlsVariants(manifest, masterURL);
+  let variants = [];
+  let headers = { Referer: embedURL, Origin: urlOrigin(embedURL), 'User-Agent': SEXBJCAM_UA };
+  for (let attempt = 0; attempt < 3 && !variants.length; attempt += 1) {
+    try {
+      const playerHTML = await fetchPlayerText(ctx, embedURL);
+      const masterURL = extractMediaURL(playerHTML, embedURL);
+      if (!masterURL) continue;
+      const manifest = await fetchSignedManifestText(ctx, masterURL, headers);
+      variants = parseHlsVariants(manifest, masterURL);
+    } catch (_) {
+      variants = [];
+    }
+  }
+  if (variants.length) {
+    SEXBJCAM_QUALITY_CACHE[embedURL] = variants.map(function (variant) {
+      return { height: variant.height, bandwidth: variant.bandwidth || 0 };
+    });
+  } else if (SEXBJCAM_QUALITY_CACHE[embedURL]) {
+    variants = SEXBJCAM_QUALITY_CACHE[embedURL].slice();
+  }
   if (!variants.length) return [];
+  return buildQualityVersions(detailURL, title, embedURL, headers, variants);
+}
+
+function buildQualityVersions(detailURL, title, embedURL, headers, variants) {
   return variants.map(function (variant, index) {
     const qualityId = 'quality:' + variant.height;
     return {
