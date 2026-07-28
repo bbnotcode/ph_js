@@ -9,8 +9,8 @@ const WidgetMetadata = {
   id: 'sexbjcam-mini-library',
   name: 'SexBJCam',
   title: 'SexBJCam',
-  version: '1.1.4',
-  author: 'EL',
+  version: '1.1.5',
+  author: 'Alan huang',
   logo: SEXBJCAM_LOGO,
   icon: SEXBJCAM_LOGO,
   site: SEXBJCAM_DEFAULT_BASE,
@@ -443,10 +443,10 @@ async function fetchPlayerText(ctx, url) {
         waitForMediaSource: true,
         headers: freshHeaders
       });
-      const mediaURL = mediaURLFromBrowserResult(result);
-      if (mediaURL) return mediaURL;
       const browserText = unwrapText(result);
       if (browserText && extractMediaURL(browserText, url)) return browserText;
+      const mediaURL = mediaURLFromBrowserResult(result);
+      if (mediaURL) return mediaURL;
     } catch (_) {}
   }
   let normalError = null;
@@ -500,7 +500,17 @@ function mediaURLFromBrowserResult(result) {
     }
   }
   for (let i = 0; i < candidates.length; i += 1) if (/\/master\.m3u8(?:$|[?#])/i.test(candidates[i])) return candidates[i];
+  for (let i = 0; i < candidates.length; i += 1) {
+    const masterURL = masterURLFromVariant(candidates[i]);
+    if (masterURL) return masterURL;
+  }
   return candidates[0] || '';
+}
+
+function masterURLFromVariant(url) {
+  const value = stringValue(url);
+  if (!/\/index-[^/?#]+\.m3u8(?:$|[?#])/i.test(value)) return '';
+  return value.replace(/\/index-[^/?#]+\.m3u8(?=[$?#])/i, '/master.m3u8');
 }
 
 function cacheBustedURL(url) {
