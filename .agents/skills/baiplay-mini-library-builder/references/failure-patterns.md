@@ -75,6 +75,7 @@ Typical failures:
 - Assuming every item uses the same player shape because one sample worked.
 - Treating the first browser-captured `.m3u8` as a master when it is already a selected media/variant playlist, so no `#EXT-X-STREAM-INF` qualities are found.
 - Caching a transient quality-discovery failure as a permanent single default line.
+- Returning a fallback default line as a successful detail result, allowing the client to cache it even after the network recovers.
 - Blindly rewriting a variant filename to `master.m3u8` without source-specific evidence or while dropping the signed query.
 
 Preferred approach:
@@ -85,6 +86,7 @@ Preferred approach:
 - Classify HLS content before parsing qualities: master playlists contain `#EXT-X-STREAM-INF`; media playlists contain `#EXTINF` and segments.
 - Prefer an explicit master reference from player HTML/config/API over arbitrary captured media. Use variant-to-master reconstruction only after proving the source's URL relationship, and preserve the exact signature/query.
 - Retry transient discovery with fresh authorization and cache only stable quality metadata. Never let a failed/default-only result poison an item's future resource versions.
+- On transient failure, omit inline resource groups and let dynamic version loading retry, or fail the dynamic request explicitly. Do not convert an unknown temporary state into a successful single-line resource model.
 - Determine whether tokens bind IP, ASN, cookies, storage, session, or User-Agent. If they do, generate and capture them through the device/browser context that will request the media.
 - Keep browser execution scoped to token generation and signed media capture; do not move stable list/detail/search traffic into the browser.
 - Prove basic playback first, then add multi-quality selection without changing the authorization path.

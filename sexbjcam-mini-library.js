@@ -9,7 +9,7 @@ const WidgetMetadata = {
   id: 'sexbjcam-mini-library',
   name: 'SexBJCam',
   title: 'SexBJCam',
-  version: '1.1.6',
+  version: '1.1.7',
   author: 'Alan huang',
   logo: SEXBJCAM_LOGO,
   icon: SEXBJCAM_LOGO,
@@ -25,6 +25,7 @@ const SEXBJCAM_SECTIONS = [
 ];
 let SEXBJCAM_REQUEST_NONCE = 0;
 const SEXBJCAM_QUALITY_CACHE = {};
+const SEXBJCAM_QUALITY_CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 function getManifest() {
   return {
@@ -118,12 +119,17 @@ async function getDetail(rawCtx) {
   const detail = parseDetailHtml(ctx, html, detailURL);
   const related = parseListHtml(ctx, html).filter(function (item) { return item.id !== detailURL; }).slice(0, 18);
   let qualityVersions = [];
+  let qualityDiscoveryFailed = false;
   if (detail.embedURL) {
-    try { qualityVersions = await loadQualityVersions(ctx, detailURL, detail.title, detail.embedURL); } catch (_) {}
+    try {
+      qualityVersions = await loadQualityVersions(ctx, detailURL, detail.title, detail.embedURL);
+    } catch (_) {
+      qualityDiscoveryFailed = true;
+    }
   }
   const resourceGroups = qualityVersions.length
     ? [{ id: 'quality', title: '画质', versions: qualityVersions }]
-    : resourceGroupsFor(ctx, detailURL, detail.title, detail.embedURL);
+    : (qualityDiscoveryFailed ? [] : resourceGroupsFor(ctx, detailURL, detail.title, detail.embedURL));
   return {
     pageType: 'detail', id: detailURL, type: 'movie', title: detail.title,
     poster: detail.poster, backdrop: detail.poster, detailImageAspectRatio: '16:9',
@@ -155,7 +161,7 @@ async function getResourceVersions(rawCtx) {
   }
   let versions = [];
   if (embedURL) {
-    try { versions = await loadQualityVersions(ctx, detailURL, title, embedURL); } catch (_) {}
+    versions = await loadQualityVersions(ctx, detailURL, title, embedURL);
   }
   return {
     itemId: detailURL,
@@ -302,27 +308,103 @@ function resourceGroupsFor(ctx, detailURL, title, embedURL) {
 
 async function loadQualityVersions(ctx, detailURL, title, embedURL) {
   let variants = [];
+  let lastError = null;
+  let manifestResolved = false;
   let headers = { Referer: embedURL, Origin: urlOrigin(embedURL), 'User-Agent': SEXBJCAM_UA };
   for (let attempt = 0; attempt < 3 && !variants.length; attempt += 1) {
     try {
       const playerHTML = await fetchPlayerText(ctx, embedURL);
       const masterURL = extractMediaURL(playerHTML, embedURL);
-      if (!masterURL) continue;
+      if (!masterURL) throw new Error('播放器没有返回 HLS 地址');
       const manifest = await fetchSignedManifestText(ctx, masterURL, headers);
+      if (!/^\s*#EXTM3U/i.test(manifest)) throw new Error('播放器没有返回有效 HLS 清单');
+      manifestResolved = true;
       variants = parseHlsVariants(manifest, masterURL);
-    } catch (_) {
+    } catch (error) {
+      lastError = error;
       variants = [];
     }
   }
   if (variants.length) {
-    SEXBJCAM_QUALITY_CACHE[embedURL] = variants.map(function (variant) {
+    writeQualityMetadata(embedURL, variants.map(function (variant) {
       return { height: variant.height, bandwidth: variant.bandwidth || 0 };
-    });
-  } else if (SEXBJCAM_QUALITY_CACHE[embedURL]) {
-    variants = SEXBJCAM_QUALITY_CACHE[embedURL].slice();
+    }));
+  } else {
+    variants = readQualityMetadata(embedURL);
+  }
+  if (!variants.length && !manifestResolved) {
+    const reason = lastError && lastError.message ? '：' + lastError.message : '';
+    throw new Error('画质加载失败，请检查网络后重新打开资源列表' + reason);
   }
   if (!variants.length) return [];
   return buildQualityVersions(detailURL, title, embedURL, headers, variants);
+}
+
+function readQualityMetadata(embedURL) {
+  const key = qualityCacheKey(embedURL);
+  const memory = normalizeQualityCacheEntry(SEXBJCAM_QUALITY_CACHE[key]);
+  if (memory.length) return memory;
+  const stores = qualityStores();
+  for (let i = 0; i < stores.length; i += 1) {
+    try {
+      const cached = normalizeQualityCacheEntry(stores[i].get(key));
+      if (cached.length) {
+        SEXBJCAM_QUALITY_CACHE[key] = { time: Date.now(), variants: cached };
+        return cached;
+      }
+    } catch (_) {}
+  }
+  return [];
+}
+
+function writeQualityMetadata(embedURL, variants) {
+  const key = qualityCacheKey(embedURL);
+  const stable = normalizeQualityMetadata(variants);
+  if (!stable.length) return;
+  const entry = { time: Date.now(), variants: stable };
+  SEXBJCAM_QUALITY_CACHE[key] = entry;
+  const stores = qualityStores();
+  for (let i = 0; i < stores.length; i += 1) {
+    try { stores[i].set(key, entry); } catch (_) {}
+  }
+}
+
+function normalizeQualityCacheEntry(entry) {
+  if (!entry) return [];
+  if (Array.isArray(entry)) return normalizeQualityMetadata(entry);
+  const time = Number(entry.time || 0);
+  if (!time || Date.now() - time > SEXBJCAM_QUALITY_CACHE_TTL_MS) return [];
+  return normalizeQualityMetadata(entry.variants);
+}
+
+function normalizeQualityMetadata(variants) {
+  const values = Array.isArray(variants) ? variants : [];
+  const stable = [], seen = {};
+  for (let i = 0; i < values.length; i += 1) {
+    const height = Number(values[i] && values[i].height || 0);
+    if (!height || seen[height]) continue;
+    seen[height] = true;
+    stable.push({ height: height, bandwidth: Number(values[i].bandwidth || 0) });
+  }
+  return stable.sort(function (a, b) { return b.height - a.height || b.bandwidth - a.bandwidth; });
+}
+
+function qualityStores() {
+  const stores = [];
+  const widget = typeof Widget !== 'undefined' ? Widget : null;
+  const cache = typeof $cache !== 'undefined' ? $cache : null;
+  if (widget && widget.storage && typeof widget.storage.get === 'function' && typeof widget.storage.set === 'function') {
+    stores.push(widget.storage);
+  }
+  if (cache && typeof cache.get === 'function' && typeof cache.set === 'function') stores.push(cache);
+  return stores;
+}
+
+function qualityCacheKey(embedURL) {
+  const value = stringValue(embedURL).replace(/[?#].*$/, '');
+  let hash = 5381;
+  for (let i = 0; i < value.length; i += 1) hash = ((hash << 5) + hash) ^ value.charCodeAt(i);
+  return 'sexbjcam:qualities:v1:' + (hash >>> 0).toString(16);
 }
 
 function buildQualityVersions(detailURL, title, embedURL, headers, variants) {
