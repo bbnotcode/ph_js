@@ -1,0 +1,4 @@
+interface:
+  display_name: "baiPlay Mini Library Builder"
+  short_description: "Build and validate baiPlay media libraries"
+  default_prompt: "Use $baiplay-mini-library-builder to create a baiPlay custom media library, validate mobile and desktop parsing, prove real pagination, and verify the detail-to-playback flow."
