@@ -12,7 +12,7 @@ const WidgetMetadata = {
   id: 'missav-mini-library',
   name: 'MissAV',
   title: 'MissAV',
-  version: '1.5.6',
+  version: '1.5.9',
   author: 'Alan huang',
   logo: MISSAV_LOGO,
   icon: MISSAV_LOGO,
@@ -49,16 +49,16 @@ const MISSAV_SECTIONS = [
   { id: 'fc2', title: 'FC2', path: '/dm597/cn/fc2', style: 'discover.posterCompact', group: 'uncensored' },
   { id: 'heyzo', title: 'HEYZO', path: '/dm2208642/cn/heyzo', style: 'discover.posterCompact', group: 'uncensored' },
   { id: 'tokyo-hot', title: '东京热', aliases: ['TOKYOHOT'], path: '/dm42/cn/tokyohot', style: 'discover.posterCompact', group: 'uncensored' },
-  { id: '1pondo', title: '一本道', path: '/dm5199603/cn/1pondo', style: 'discover.posterCompact', group: 'uncensored' },
+  { id: '1pondo', title: '一本道', path: '/dm5199603/cn/1pondo', style: 'discover.posterCompact', group: 'uncensored', artworkCodePrefixes: ['pondo-'], detailSlugPattern: '^pondo-\\d{6}_\\d{3}$' },
   { id: 'caribbeancom', title: 'Caribbeancom', path: '/dm7704788/cn/caribbeancom', style: 'discover.posterCompact', group: 'uncensored' },
-  { id: 'caribbeancompr', title: 'Caribbeancompr', path: '/dm91887/cn/caribbeancompr', style: 'discover.posterCompact', group: 'uncensored' },
-  { id: '10musume', title: '10musume', path: '/dm7208981/cn/10musume', style: 'discover.posterCompact', group: 'uncensored' },
-  { id: 'pacopacomama', title: 'pacopacomama', path: '/dm3600557/cn/pacopacomama', style: 'discover.posterCompact', group: 'uncensored' },
-  { id: 'gachinco', title: 'Gachinco', path: '/dm150/cn/gachinco', style: 'discover.posterCompact', group: 'uncensored' },
+  { id: 'caribbeancompr', title: 'Caribbeancompr', path: '/dm91887/cn/caribbeancompr', style: 'discover.posterCompact', group: 'uncensored', detailSlugPattern: '^\\d{6}_\\d{3}$' },
+  { id: '10musume', title: '10musume', path: '/dm7208981/cn/10musume', style: 'discover.posterCompact', group: 'uncensored', artworkCodePrefixes: ['musume-'], detailSlugPattern: '^musume-\\d{6}_\\d{2}$' },
+  { id: 'pacopacomama', title: 'pacopacomama', path: '/dm3600557/cn/pacopacomama', style: 'discover.posterCompact', group: 'uncensored', artworkCodePrefixes: ['pacopacomama-'], detailSlugPattern: '^pacopacomama-\\d{6}_\\d{3}$' },
+  { id: 'gachinco', title: 'Gachinco', path: '/dm150/cn/gachinco', style: 'discover.posterCompact', group: 'uncensored', artworkCodePrefixes: ['gachi'] },
   { id: 'xxx-av', title: 'XXX-AV', aliases: ['XXXAV'], path: '/dm42/cn/xxxav', style: 'discover.posterCompact', group: 'uncensored' },
-  { id: 'marriedslash', title: '人妻斩', path: '/dm37/cn/marriedslash', style: 'discover.posterCompact', group: 'uncensored' },
-  { id: 'naughty4610', title: '顽皮 4610', path: '/dm33/cn/naughty4610', style: 'discover.posterCompact', group: 'uncensored' },
-  { id: 'naughty0930', title: '顽皮 0930', path: '/dm37/cn/naughty0930', style: 'discover.posterCompact', group: 'uncensored' },
+  { id: 'marriedslash', title: '人妻斩', path: '/dm37/cn/marriedslash', style: 'discover.posterCompact', group: 'uncensored', artworkCodePrefixes: ['c0930-'] },
+  { id: 'naughty4610', title: '顽皮 4610', path: '/dm33/cn/naughty4610', style: 'discover.posterCompact', group: 'uncensored', artworkCodePrefixes: ['h4610-'] },
+  { id: 'naughty0930', title: '顽皮 0930', path: '/dm37/cn/naughty0930', style: 'discover.posterCompact', group: 'uncensored', artworkCodePrefixes: ['h0930-'] },
 
   { id: 'madou', title: '麻豆传媒', path: '/dm63/cn/madou', style: 'discover.posterCompact', group: 'asian' },
   { id: 'twav', title: 'TWAV', path: '/dm31/cn/twav', style: 'discover.posterCompact', group: 'asian' },
@@ -73,29 +73,6 @@ const MISSAV_CATEGORY_GROUPS = [
   { id: 'uncensored', title: '无码影片' },
   { id: 'asian', title: '亚洲 AV' }
 ];
-
-const MISSAV_CATEGORY_COVERS = {
-  recommended: 'https://fourhoi.com/meyd-532-uncensored-leak/cover-t.jpg',
-  nakadashi: 'https://fourhoi.com/start-612/cover-t.jpg',
-  'big-breasts': 'https://fourhoi.com/start-612/cover-t.jpg',
-  'married-women': 'https://fourhoi.com/sdnm-556/cover-t.jpg',
-  'new-release': 'https://fourhoi.com/fns-239/cover-t.jpg',
-  latest: 'https://fourhoi.com/sdmm-236/cover-t.jpg',
-  'uncensored-leak': 'https://fourhoi.com/fc2-ppv-4945925/cover-t.jpg',
-  random: 'https://fourhoi.com/mlw-2041/cover-t.jpg',
-  actresses: 'https://fourhoi.com/actress/26225-t.jpg',
-  'actress-ranking': 'https://fourhoi.com/actress/1054998-t.jpg',
-  caribbeancom: 'https://fourhoi.com/caribbeancom-072726-001/cover-t.jpg',
-  gachinco: 'https://fourhoi.com/gachip140/cover-t.jpg',
-  twav: 'https://fourhoi.com/twav-d001/cover-t.jpg'
-};
-
-const MISSAV_GROUP_COVERS = {
-  japanese: 'https://fourhoi.com/fns-239/cover-t.jpg',
-  amateur: 'https://fourhoi.com/start-612/cover-t.jpg',
-  uncensored: 'https://fourhoi.com/fc2-ppv-4945925/cover-t.jpg',
-  asian: 'https://fourhoi.com/twav-d001/cover-t.jpg'
-};
 
 const MISSAV_HOME_MEDIA_SECTION_IDS = [
   'recommended',
@@ -280,14 +257,29 @@ function categoryGroupSections(ctx, artwork) {
     });
     for (let offset = 0; offset < categories.length; offset += 6) {
       const part = Math.floor(offset / 6);
+      const groupSectionId = 'missav-categories-' + group.id + (part ? '-' + (part + 1) : '');
+      const groupCategories = categories.slice(offset, offset + 6);
+      const hasCompleteArtwork = groupCategories.every(function (category) {
+        return categoryPreviewItems(
+          artwork && artwork[category.id] && artwork[category.id].length
+            ? artwork[category.id]
+            : cachedCategoryArtwork(ctx, category.id),
+          category
+        ).length >= 3;
+      });
       sections.push({
-        id: 'missav-categories-' + group.id + (part ? '-' + (part + 1) : ''),
+        id: groupSectionId,
         title: group.title + (part ? '（续 ' + part + '）' : ''),
         style: 'discover.annualWidePreview',
-        lazy: false,
-        items: categories.slice(offset, offset + 6).map(function (category) {
-          return categoryCard(ctx, category, artwork && artwork[category.id]);
-        })
+        lazy: !hasCompleteArtwork,
+        loadAction: !hasCompleteArtwork
+          ? { type: 'custom', id: groupSectionId, sectionId: groupSectionId, title: group.title }
+          : undefined,
+        items: hasCompleteArtwork
+          ? groupCategories.map(function (category) {
+              return categoryCard(ctx, category, artwork && artwork[category.id]);
+            })
+          : []
       });
     }
   });
@@ -299,9 +291,8 @@ function categoryCard(ctx, category, livePreviewItems) {
   const previewItems = categoryPreviewItems(
     livePreviewItems && livePreviewItems.length
       ? livePreviewItems
-      : cachedPreviewItems.length
-        ? cachedPreviewItems
-        : [fallbackCategoryPreview(ctx, category)]
+      : cachedPreviewItems,
+    category
   );
   const cover = previewItems[0] && firstNonEmpty(
     previewItems[0].backdrop,
@@ -344,31 +335,11 @@ function categoryCard(ctx, category, livePreviewItems) {
   return item;
 }
 
-function fallbackCategoryPreview(ctx, category) {
-  const image = MISSAV_CATEGORY_COVERS[category.id] || MISSAV_GROUP_COVERS[category.group] || MISSAV_LOGO;
-  return {
-    id: 'category-preview-' + category.id,
-    title: category.title,
-    type: 'collection',
-    poster: image,
-    backdrop: image,
-    thumbnailURL: image,
-    aspectRatio: '16:9',
-    action: {
-      type: 'category',
-      id: category.id,
-      pageId: category.id,
-      title: category.title,
-      url: categoryURL(ctx, category.path)
-    }
-  };
-}
-
 function categoryArtworkFromSections(ctx, sections) {
   const artwork = {};
   (sections || []).forEach(function (section) {
     if (!section || !section.id || !section.items || !section.items.length) return;
-    const previews = categoryPreviewItems(section.items);
+    const previews = categoryPreviewItems(section.items, findSection(section.id));
     if (!previews.length) return;
     artwork[section.id] = previews;
     rememberCategoryArtwork(ctx, section.id, previews);
@@ -376,15 +347,29 @@ function categoryArtworkFromSections(ctx, sections) {
   return artwork;
 }
 
-function categoryPreviewItems(items) {
+function categoryPreviewItems(items, category) {
+  const prefixes = category && Array.isArray(category.artworkCodePrefixes)
+    ? category.artworkCodePrefixes.map(function (value) {
+        return String(value || '').toLowerCase();
+      }).filter(Boolean)
+    : [];
   return (items || []).filter(function (item) {
-    return !!(item && firstNonEmpty(item.backdrop, item.poster, item.thumbnailURL));
-  }).slice(0, 8).map(function (item) {
+    if (!item || !firstNonEmpty(item.backdrop, item.poster, item.thumbnailURL)) return false;
+    if (!prefixes.length && !(category && category.detailSlugPattern)) return true;
+    if (!categoryMatchesItem(item, category)) return false;
+    if (!prefixes.length) return true;
+    const target = stringValue(item.action && (item.action.url || item.action.itemId || item.action.id)).toLowerCase();
+    const title = stringValue(item.title).toLowerCase();
+    return prefixes.some(function (prefix) {
+      return target.indexOf('/' + prefix) >= 0 || title.indexOf(prefix) >= 0;
+    });
+  }).slice(0, 3).map(function (item, index) {
     const image = firstNonEmpty(item.backdrop, item.poster, item.thumbnailURL);
     return {
       id: item.id,
       title: item.title,
       type: item.type || 'movie',
+      rank: index + 1,
       poster: image,
       backdrop: image,
       thumbnailURL: image,
@@ -394,15 +379,38 @@ function categoryPreviewItems(items) {
   });
 }
 
+function categoryMatchesItem(item, category) {
+  if (!category || !category.detailSlugPattern) return true;
+  const target = stringValue(item && item.action && (item.action.url || item.action.itemId || item.action.id));
+  const slug = categorySlug(pathOf(target)).toLowerCase();
+  try {
+    return new RegExp(category.detailSlugPattern, 'i').test(slug);
+  } catch (error) {
+    return true;
+  }
+}
+
+function filterCategoryItems(items, category) {
+  if (!category || !category.detailSlugPattern) return items || [];
+  return (items || []).filter(function (item) {
+    return categoryMatchesItem(item, category);
+  });
+}
+
 async function getHomeSection(ctx) {
   ctx = normalizeContext(ctx);
   const sectionId = stringValue(ctx && (ctx.sectionId || ctx.id));
+  const categoryGroup = categoryGroupFromSectionId(sectionId);
+  if (categoryGroup) return loadCategoryGroupSection(ctx, categoryGroup);
   const section = findSection(sectionId) || MISSAV_SECTIONS[0];
   if (section.personalizedHome) return personalizedRecommendationSection(ctx, section);
   const url = categoryURL(ctx, section.path);
   try {
     const html = await fetchText(ctx, url, entryURL(ctx));
-    const items = parseCards(html, section.title, ctx).slice(0, 18);
+    const items = filterCategoryItems(
+      parseCards(mediaListBlock(html), section.title, ctx),
+      section
+    ).slice(0, 18);
     rememberCategoryArtwork(ctx, section.id, items);
     return {
       id: section.id,
@@ -414,6 +422,83 @@ async function getHomeSection(ctx) {
     };
   } catch (error) {
     return verificationSection(ctx, section.id, section.title, section.style, url, error);
+  }
+}
+
+function categoryGroupFromSectionId(sectionId) {
+  const value = stringValue(sectionId);
+  const match = /^missav-categories-([a-z]+)(?:-(\d+))?$/.exec(value);
+  if (!match) return null;
+  const group = MISSAV_CATEGORY_GROUPS.find(function (item) {
+    return item.id === match[1];
+  });
+  if (!group) return null;
+  const partNumber = Math.max(1, Number(match[2] || 1));
+  const categories = MISSAV_SECTIONS.filter(function (category) {
+    return category.group === group.id;
+  }).slice((partNumber - 1) * 6, partNumber * 6);
+  if (!categories.length) return null;
+  return {
+    id: value,
+    title: group.title + (partNumber > 1 ? '（续 ' + (partNumber - 1) + '）' : ''),
+    categories: categories
+  };
+}
+
+async function loadCategoryGroupSection(ctx, groupSection) {
+  const artwork = {};
+  const categories = groupSection.categories || [];
+  for (let offset = 0; offset < categories.length; offset += 2) {
+    const batch = categories.slice(offset, offset + 2);
+    const results = await Promise.all(batch.map(function (category) {
+      return loadCategoryPreviewItems(ctx, category);
+    }));
+    batch.forEach(function (category, index) {
+      artwork[category.id] = results[index];
+    });
+  }
+  return {
+    id: groupSection.id,
+    title: groupSection.title,
+    style: 'discover.annualWidePreview',
+    lazy: false,
+    items: categories.map(function (category) {
+      return categoryCard(ctx, category, artwork[category.id]);
+    })
+  };
+}
+
+async function loadCategoryPreviewItems(ctx, category) {
+  const cached = categoryPreviewItems(cachedCategoryArtwork(ctx, category.id), category);
+  if (cached.length >= 3) return cached;
+  try {
+    const url = categoryURL(ctx, category.path);
+    let html;
+    if (category.personalizedHome) {
+      html = await fetchText(ctx, entryURL(ctx), entryURL(ctx));
+    } else if (category.categoryIndex && isActressIndexURL(url)) {
+      html = await fetchActressIndexText(ctx, url, entryURL(ctx));
+    } else {
+      html = await fetchText(ctx, url, entryURL(ctx));
+    }
+    let items;
+    if (category.personalizedHome) {
+      items = parseCards(sectionBlock(html, category.title), category.title, ctx);
+      if (!items.length) items = parseCards(mediaListBlock(html), category.title, ctx);
+    } else if (category.categoryIndex) {
+      items = parseCategoryCards(ctx, html, category.title);
+      if (!items.length) items = parseCards(mediaListBlock(html), category.title, ctx);
+    } else {
+      items = filterCategoryItems(
+        parseCards(mediaListBlock(html), category.title, ctx),
+        category
+      );
+    }
+    const previews = categoryPreviewItems(items, category);
+    if (previews.length) rememberCategoryArtwork(ctx, category.id, previews);
+    return previews;
+  } catch (error) {
+    return cached;
   }
 }
 
@@ -469,7 +554,9 @@ async function getCategory(ctx) {
   const title = section ? section.title : primary ? primary.title : pageTitle(html) || 'MissAV';
   const categoryIndex = !!(section && section.categoryIndex);
   const categoryItems = categoryIndex ? parseCategoryCards(ctx, html, title) : [];
-  const items = categoryItems.length ? [] : parseCards(html, title, ctx);
+  const items = categoryItems.length
+    ? []
+    : filterCategoryItems(parseCards(mediaListBlock(html), title, ctx), section);
   const fallbackCategoryItems = items.length || categoryItems.length ? [] : parseCategoryCards(ctx, html, title);
   const listItems = items.length
     ? items
@@ -1293,11 +1380,11 @@ function cacheKey(url) {
 }
 
 function categoryArtworkKey(ctx, pageId) {
-  return 'missav:category-artwork:v1:' + baseURL(ctx) + ':' + String(pageId || '');
+  return 'missav:category-artwork:v4:' + baseURL(ctx) + ':' + String(pageId || '');
 }
 
 function rememberCategoryArtwork(ctx, pageId, items) {
-  const previews = categoryPreviewItems(items);
+  const previews = categoryPreviewItems(items, findSection(pageId));
   if (!previews.length) return;
   const key = categoryArtworkKey(ctx, pageId);
   const value = {
@@ -1325,7 +1412,7 @@ function cachedCategoryArtwork(ctx, pageId) {
 }
 
 function categoryStateKey(ctx, pageId) {
-  return 'missav:category-state:v5:' + baseURL(ctx) + ':' + String(pageId || '');
+  return 'missav:category-state:v6:' + baseURL(ctx) + ':' + String(pageId || '');
 }
 
 function memoryCache() {
@@ -1909,6 +1996,25 @@ function parseCards(html, fallbackTitle, ctx) {
   return items;
 }
 
+function mediaListBlock(html) {
+  const source = String(html || '');
+  if (!source) return source;
+  const anchorPattern = /<a\b([^>]*)>([\s\S]*?)<\/a>/gi;
+  let match;
+  let firstMediaIndex = -1;
+  while ((match = anchorPattern.exec(source))) {
+    if (!isDetailHref(attr(match[1], 'href'))) continue;
+    firstMediaIndex = match.index;
+    break;
+  }
+  if (firstMediaIndex < 0) return source;
+  const headingIndex = source.lastIndexOf('<h1', firstMediaIndex);
+  const mainIndex = source.lastIndexOf('<main', firstMediaIndex);
+  const start = Math.max(headingIndex, mainIndex, 0);
+  const footerIndex = source.indexOf('<footer', firstMediaIndex);
+  return source.slice(start, footerIndex > firstMediaIndex ? footerIndex : undefined);
+}
+
 function mediaBlocks(html) {
   const source = String(html || '');
   const blocks = [];
@@ -2277,9 +2383,9 @@ function playbackResult(ctx, url, referer) {
 function extractPlayableURL(html) {
   const source = decodeEscapes(String(html || '') + '\n' + unpackPackedScripts(html).join('\n'));
   return firstPlayable(
+    firstMatch(source, /\bsource\s*=\s*["']([^"']+\.(?:m3u8|mp4|mpd)[^"']*)["']/i),
     firstMatch(source, /source1280\s*=\s*["']([^"']+\.(?:m3u8|mp4|mpd)[^"']*)["']/i),
     firstMatch(source, /source842\s*=\s*["']([^"']+\.(?:m3u8|mp4|mpd)[^"']*)["']/i),
-    firstMatch(source, /source\s*=\s*["']([^"']+\.(?:m3u8|mp4|mpd)[^"']*)["']/i),
     firstMatch(source, /var\s+hlsUrl\s*=\s*["']([^"']+\.(?:m3u8|mp4|mpd)[^"']*)["']/i),
     firstMatch(source, /<video\b[^>]*\b(?:data-src|src)\s*=\s*["']([^"']+\.(?:m3u8|mp4|mpd)[^"']*)["']/i),
     firstMatch(source, /source\s+src\s*=\s*["']([^"']+\.(?:m3u8|mp4|mpd)[^"']*)["']/i),
@@ -2480,11 +2586,14 @@ function isDetailHref(href) {
   if (parts.length !== 1) return false;
   const slug = parts[0] || '';
   if (/^(?:new|release|random|search|history|playlists?|saved|favorite|login|register|vip)$/i.test(slug)) return false;
-  // Most MissAV codes use a hyphen (for example abc-123), but Gachinco
-  // publishes codes such as gachip140 and gachi1083 without one.
-  return /^[a-z0-9]+(?:-[a-z0-9]+)*$/i.test(slug) &&
+  // Most MissAV codes use a hyphen (for example abc-123), while the
+  // 1pondo/Caribbeancompr/10musume/pacopacomama feeds use date-based
+  // underscore IDs such as pondo-072526_001 and 051726_001.
+  const standardCode = /^[a-z0-9]+(?:[-_][a-z0-9]+)*$/i.test(slug) &&
     /[a-z]/i.test(slug) &&
     /\d/.test(slug);
+  const dateOnlyCode = /^\d{6}_\d{2,3}$/i.test(slug);
+  return standardCode || dateOnlyCode;
 }
 
 function categorySlug(value) {
