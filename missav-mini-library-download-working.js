@@ -12,7 +12,7 @@ const WidgetMetadata = {
   id: 'missav-mini-library',
   name: 'MissAV',
   title: 'MissAV',
-  version: '1.5.3',
+  version: '1.5.4',
   author: 'Alan huang',
   logo: MISSAV_LOGO,
   icon: MISSAV_LOGO,
@@ -352,7 +352,9 @@ async function getCategory(ctx) {
   try {
     html = isActressWorksURL(url)
       ? await fetchActressCategoryText(ctx, url, entryURL(ctx))
-      : await fetchText(ctx, url, entryURL(ctx));
+      : isActressIndexURL(url)
+        ? await fetchActressIndexText(ctx, url, entryURL(ctx))
+        : await fetchText(ctx, url, entryURL(ctx));
   } catch (error) {
     return verificationCategory(ctx, pageId, section ? section.title : primary ? primary.title : '需要验证', url, error, page);
   }
@@ -838,12 +840,18 @@ function isActressWorksURL(url) {
     !/\/actresses\/ranking$/i.test(path);
 }
 
+function isActressIndexURL(url) {
+  const path = pathOf(url).split('?')[0].replace(/\/+$/, '');
+  return /\/(?:dm\d+\/)?cn\/actresses(?:\/ranking)?$/i.test(path);
+}
+
 async function fetchActressCategoryText(ctx, url, referer) {
   const cached = getCachedText(ctx, url);
   if (cached) return cached;
 
   const fastContext = Object.assign({}, ctx || {}, {
-    requestTimeoutSeconds: Math.min(numberParam(ctx, 'requestTimeoutSeconds', 45), 12)
+    requestTimeoutSeconds: Math.min(numberParam(ctx, 'requestTimeoutSeconds', 45), 12),
+    suppressBrowserFailureCooldown: true
   });
 
   let lastError = null;
@@ -874,6 +882,43 @@ async function fetchActressCategoryText(ctx, url, referer) {
 
   throw new Error(
     '女优作品页读取失败。已短暂尝试复用刚才的验证状态，请点击一次真人验证后重试。' +
+    (lastError && lastError.message ? ' 原因：' + lastError.message : '')
+  );
+}
+
+async function fetchActressIndexText(ctx, url, referer) {
+  const cached = getCachedText(ctx, url);
+  if (cached && isVerifiedTargetHTML(ctx, url, cached)) return cached;
+
+  const fastContext = Object.assign({}, ctx || {}, {
+    requestTimeoutSeconds: Math.min(numberParam(ctx, 'requestTimeoutSeconds', 45), 12),
+    suppressBrowserFailureCooldown: true
+  });
+  let lastError = null;
+  try {
+    const options = requestOptions(fastContext, referer || url);
+    options.useBrowserFallback = false;
+    options.browserFallback = false;
+    options.allowBrowserFallback = false;
+    const response = await httpGet(url, options);
+    const text = responseText(response);
+    if (isVerifiedTargetHTML(fastContext, url, text)) {
+      setCachedText(ctx, url, text);
+      return text;
+    }
+    throw new Error('HTTP ' + (response && response.status ? response.status : 'empty'));
+  } catch (error) {
+    lastError = error;
+  }
+
+  const browserText = await browserHTML(fastContext, url, referer || url);
+  if (isVerifiedTargetHTML(fastContext, url, browserText)) {
+    setCachedText(ctx, url, browserText);
+    return browserText;
+  }
+
+  throw new Error(
+    '女优目录读取失败。已短暂尝试复用浏览器验证状态，请手动完成一次真人验证。' +
     (lastError && lastError.message ? ' 原因：' + lastError.message : '')
   );
 }
@@ -1029,7 +1074,10 @@ async function browserHTML(ctx, url, referer, forceVisible) {
 }
 
 function browserFailureKey(url) {
-  return 'missav:browser-failure:' + originOf(url);
+  const scope = isActressWorksURL(url) || isActressIndexURL(url)
+    ? pathOf(url).split('?')[0].replace(/\/+$/, '')
+    : '';
+  return 'missav:browser-failure:' + originOf(url) + (scope ? ':' + scope : '');
 }
 
 function browserRetryBlocked(ctx, url) {
@@ -1038,6 +1086,7 @@ function browserRetryBlocked(ctx, url) {
 }
 
 function rememberBrowserFailure(ctx, url) {
+  if (boolParam(ctx, 'suppressBrowserFailureCooldown', false)) return;
   const minutes = Math.max(0, numberParam(ctx, 'verificationCooldownMinutes', 10));
   if (!minutes) return;
   cacheSet(browserFailureKey(url), { retryAfter: Date.now() + minutes * 60 * 1000 });
@@ -1135,7 +1184,7 @@ function cacheKey(url) {
 }
 
 function categoryStateKey(ctx, pageId) {
-  return 'missav:category-state:v4:' + baseURL(ctx) + ':' + String(pageId || '');
+  return 'missav:category-state:v5:' + baseURL(ctx) + ':' + String(pageId || '');
 }
 
 function memoryCache() {
@@ -1272,7 +1321,9 @@ function getCachedText(ctx, url) {
 
 function setCachedText(ctx, url, text) {
   if (!isUsableHTML(text)) return;
-  const ttl = numberParam(ctx, 'cacheMinutes', 20) * 60 * 1000;
+  const configuredMinutes = numberParam(ctx, 'cacheMinutes', 20);
+  const minimumMinutes = isActressIndexURL(url) ? 60 : isActressWorksURL(url) ? 30 : 0;
+  const ttl = Math.max(configuredMinutes, minimumMinutes) * 60 * 1000;
   if (ttl <= 0) return;
   const value = { text: text, expiresAt: Date.now() + ttl };
   const key = cacheKey(url);
@@ -1499,7 +1550,8 @@ async function runVerificationCategory(ctx, pageId, url) {
   const ok = isVerifiedTargetHTML(ctx, url, html);
   if (ok) {
     setCachedText(ctx, url, html);
-    if (isActressWorksURL(url)) {
+    if (isActressWorksURL(url) || isActressIndexURL(url)) {
+      resetCategoryState(ctx, normalizePageId(ctx, url));
       return resumeVerifiedCategory(ctx, pageId, url, 1);
     }
   }
@@ -1545,45 +1597,22 @@ async function resumeVerifiedCategory(ctx, verificationPageId, targetURL, page) 
   let result = await getCategory(resumedContext);
   result.id = stablePageId;
   result.verificationTarget = targetURL;
-
-  // The first actress page contains 12 works. Prefetch page 2 after a visible
-  // verification so baiPlay returns to a normal, pageable category instead of
-  // showing 12 works plus a second verification card.
-  if (
-    page === 1 &&
-    isActressWorksURL(targetURL) &&
-    result.items &&
-    result.items.length &&
-    result.hasMore &&
-    Number(result.page || 1) === 1
-  ) {
-    const prefetched = await prefetchActressWorksPage(ctx, stablePageId, targetURL, 2);
-    if (prefetched) {
-      result = await getCategory(resumedContext);
-      result.id = stablePageId;
-      result.verificationTarget = targetURL;
-    }
-  }
   return result;
 }
 
-async function prefetchActressWorksPage(ctx, pageId, targetURL, page) {
-  try {
-    const url = pagedURL(targetURL, page);
-    const html = await fetchActressCategoryText(ctx, url, targetURL);
-    const items = parseCards(html, pageTitle(html) || '女优作品', ctx);
-    if (!items.length) return false;
-    rememberCategoryPage(ctx, pageId, page, items, paginationInfo(html, page, items.length));
-    return true;
-  } catch (error) {
-    return false;
-  }
+function resetCategoryState(ctx, pageId) {
+  const key = categoryStateKey(ctx, pageId);
+  delete memoryCache()[key];
+  cacheSet(key, { pages: {}, expiresAt: 0 });
 }
 
 function isVerifiedTargetHTML(ctx, url, html) {
   if (!isUsableHTML(html)) return false;
   if (isActressWorksURL(url)) {
     return parseCards(html, pageTitle(html) || '女优作品', ctx).length > 0;
+  }
+  if (isActressIndexURL(url)) {
+    return parseCategoryCards(ctx, html, /\/ranking$/i.test(pathOf(url)) ? '女优排行' : '女优一览').length > 0;
   }
   return true;
 }
