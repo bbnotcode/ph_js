@@ -12,7 +12,7 @@ const WidgetMetadata = {
   id: 'missav-mini-library',
   name: 'MissAV',
   title: 'MissAV',
-  version: '1.5.3',
+  version: '1.5.9',
   author: 'Alan huang',
   logo: MISSAV_LOGO,
   icon: MISSAV_LOGO,
@@ -49,16 +49,16 @@ const MISSAV_SECTIONS = [
   { id: 'fc2', title: 'FC2', path: '/dm597/cn/fc2', style: 'discover.posterCompact', group: 'uncensored' },
   { id: 'heyzo', title: 'HEYZO', path: '/dm2208642/cn/heyzo', style: 'discover.posterCompact', group: 'uncensored' },
   { id: 'tokyo-hot', title: '东京热', aliases: ['TOKYOHOT'], path: '/dm42/cn/tokyohot', style: 'discover.posterCompact', group: 'uncensored' },
-  { id: '1pondo', title: '一本道', path: '/dm5199603/cn/1pondo', style: 'discover.posterCompact', group: 'uncensored' },
+  { id: '1pondo', title: '一本道', path: '/dm5199603/cn/1pondo', style: 'discover.posterCompact', group: 'uncensored', artworkCodePrefixes: ['pondo-'], detailSlugPattern: '^pondo-\\d{6}_\\d{3}$' },
   { id: 'caribbeancom', title: 'Caribbeancom', path: '/dm7704788/cn/caribbeancom', style: 'discover.posterCompact', group: 'uncensored' },
-  { id: 'caribbeancompr', title: 'Caribbeancompr', path: '/dm91887/cn/caribbeancompr', style: 'discover.posterCompact', group: 'uncensored' },
-  { id: '10musume', title: '10musume', path: '/dm7208981/cn/10musume', style: 'discover.posterCompact', group: 'uncensored' },
-  { id: 'pacopacomama', title: 'pacopacomama', path: '/dm3600557/cn/pacopacomama', style: 'discover.posterCompact', group: 'uncensored' },
-  { id: 'gachinco', title: 'Gachinco', path: '/dm150/cn/gachinco', style: 'discover.posterCompact', group: 'uncensored' },
+  { id: 'caribbeancompr', title: 'Caribbeancompr', path: '/dm91887/cn/caribbeancompr', style: 'discover.posterCompact', group: 'uncensored', detailSlugPattern: '^\\d{6}_\\d{3}$' },
+  { id: '10musume', title: '10musume', path: '/dm7208981/cn/10musume', style: 'discover.posterCompact', group: 'uncensored', artworkCodePrefixes: ['musume-'], detailSlugPattern: '^musume-\\d{6}_\\d{2}$' },
+  { id: 'pacopacomama', title: 'pacopacomama', path: '/dm3600557/cn/pacopacomama', style: 'discover.posterCompact', group: 'uncensored', artworkCodePrefixes: ['pacopacomama-'], detailSlugPattern: '^pacopacomama-\\d{6}_\\d{3}$' },
+  { id: 'gachinco', title: 'Gachinco', path: '/dm150/cn/gachinco', style: 'discover.posterCompact', group: 'uncensored', artworkCodePrefixes: ['gachi'] },
   { id: 'xxx-av', title: 'XXX-AV', aliases: ['XXXAV'], path: '/dm42/cn/xxxav', style: 'discover.posterCompact', group: 'uncensored' },
-  { id: 'marriedslash', title: '人妻斩', path: '/dm37/cn/marriedslash', style: 'discover.posterCompact', group: 'uncensored' },
-  { id: 'naughty4610', title: '顽皮 4610', path: '/dm33/cn/naughty4610', style: 'discover.posterCompact', group: 'uncensored' },
-  { id: 'naughty0930', title: '顽皮 0930', path: '/dm37/cn/naughty0930', style: 'discover.posterCompact', group: 'uncensored' },
+  { id: 'marriedslash', title: '人妻斩', path: '/dm37/cn/marriedslash', style: 'discover.posterCompact', group: 'uncensored', artworkCodePrefixes: ['c0930-'] },
+  { id: 'naughty4610', title: '顽皮 4610', path: '/dm33/cn/naughty4610', style: 'discover.posterCompact', group: 'uncensored', artworkCodePrefixes: ['h4610-'] },
+  { id: 'naughty0930', title: '顽皮 0930', path: '/dm37/cn/naughty0930', style: 'discover.posterCompact', group: 'uncensored', artworkCodePrefixes: ['h0930-'] },
 
   { id: 'madou', title: '麻豆传媒', path: '/dm63/cn/madou', style: 'discover.posterCompact', group: 'asian' },
   { id: 'twav', title: 'TWAV', path: '/dm31/cn/twav', style: 'discover.posterCompact', group: 'asian' },
@@ -218,7 +218,8 @@ async function getHome(ctx) {
   const html = await safeFetch(ctx, entryURL(ctx), baseURL(ctx) + '/');
   const hero = parseCards(sectionBlock(html, '推荐给你'), '推荐给你', ctx).slice(0, 10).map(toWideItem);
   const mediaSections = homeMediaSections(ctx, parseHomeSections(ctx, html));
-  const sections = categoryGroupSections(ctx).concat(mediaSections);
+  const artwork = categoryArtworkFromSections(ctx, mediaSections);
+  const sections = categoryGroupSections(ctx, artwork).concat(mediaSections);
 
   return {
     pageType: 'home',
@@ -248,7 +249,7 @@ function homeMediaSections(ctx, parsedSections) {
   return sections;
 }
 
-function categoryGroupSections(ctx) {
+function categoryGroupSections(ctx, artwork) {
   const sections = [];
   MISSAV_CATEGORY_GROUPS.forEach(function (group) {
     const categories = MISSAV_SECTIONS.filter(function (category) {
@@ -256,28 +257,55 @@ function categoryGroupSections(ctx) {
     });
     for (let offset = 0; offset < categories.length; offset += 6) {
       const part = Math.floor(offset / 6);
+      const groupSectionId = 'missav-categories-' + group.id + (part ? '-' + (part + 1) : '');
+      const groupCategories = categories.slice(offset, offset + 6);
+      const hasCompleteArtwork = groupCategories.every(function (category) {
+        return categoryPreviewItems(
+          artwork && artwork[category.id] && artwork[category.id].length
+            ? artwork[category.id]
+            : cachedCategoryArtwork(ctx, category.id),
+          category
+        ).length >= 3;
+      });
       sections.push({
-        id: 'missav-categories-' + group.id + (part ? '-' + (part + 1) : ''),
+        id: groupSectionId,
         title: group.title + (part ? '（续 ' + part + '）' : ''),
-        style: 'discover.annualCategories',
-        lazy: false,
-        items: categories.slice(offset, offset + 6).map(function (category) {
-          return categoryCard(ctx, category);
-        })
+        style: 'discover.annualWidePreview',
+        lazy: !hasCompleteArtwork,
+        loadAction: !hasCompleteArtwork
+          ? { type: 'custom', id: groupSectionId, sectionId: groupSectionId, title: group.title }
+          : undefined,
+        items: hasCompleteArtwork
+          ? groupCategories.map(function (category) {
+              return categoryCard(ctx, category, artwork && artwork[category.id]);
+            })
+          : []
       });
     }
   });
   return sections;
 }
 
-function categoryCard(ctx, category) {
-  return {
+function categoryCard(ctx, category, livePreviewItems) {
+  const cachedPreviewItems = cachedCategoryArtwork(ctx, category.id);
+  const previewItems = categoryPreviewItems(
+    livePreviewItems && livePreviewItems.length
+      ? livePreviewItems
+      : cachedPreviewItems,
+    category
+  );
+  const cover = previewItems[0] && firstNonEmpty(
+    previewItems[0].backdrop,
+    previewItems[0].poster,
+    previewItems[0].thumbnailURL
+  );
+  const item = {
     id: 'category-' + category.id,
     title: category.title,
-    subtitle: category.subtitle || '',
+    subtitle: category.subtitle || '浏览' + category.title + '相关内容',
     type: 'category',
     aspectRatio: '16:9',
-    previewItems: [],
+    previewItems: previewItems,
     action: {
       type: 'category',
       id: category.id,
@@ -287,26 +315,190 @@ function categoryCard(ctx, category) {
       itemAspectRatio: '16:9'
     }
   };
+  if (cover) {
+    item.poster = cover;
+    item.backdrop = cover;
+    item.thumbnailURL = cover;
+    item.posterPath = cover;
+    item.backdropPath = cover;
+    item.image = cover;
+    item.imageURL = cover;
+    item.posterURL = cover;
+    item.backdropURL = cover;
+    item.cover = cover;
+    item.coverURL = cover;
+    item.imageFit = 'fill';
+    item.imageHeaders = imageHeaders(ctx, categoryURL(ctx, category.path));
+    item.posterHeaders = item.imageHeaders;
+    item.backdropHeaders = item.imageHeaders;
+  }
+  return item;
+}
+
+function categoryArtworkFromSections(ctx, sections) {
+  const artwork = {};
+  (sections || []).forEach(function (section) {
+    if (!section || !section.id || !section.items || !section.items.length) return;
+    const previews = categoryPreviewItems(section.items, findSection(section.id));
+    if (!previews.length) return;
+    artwork[section.id] = previews;
+    rememberCategoryArtwork(ctx, section.id, previews);
+  });
+  return artwork;
+}
+
+function categoryPreviewItems(items, category) {
+  const prefixes = category && Array.isArray(category.artworkCodePrefixes)
+    ? category.artworkCodePrefixes.map(function (value) {
+        return String(value || '').toLowerCase();
+      }).filter(Boolean)
+    : [];
+  return (items || []).filter(function (item) {
+    if (!item || !firstNonEmpty(item.backdrop, item.poster, item.thumbnailURL)) return false;
+    if (!prefixes.length && !(category && category.detailSlugPattern)) return true;
+    if (!categoryMatchesItem(item, category)) return false;
+    if (!prefixes.length) return true;
+    const target = stringValue(item.action && (item.action.url || item.action.itemId || item.action.id)).toLowerCase();
+    const title = stringValue(item.title).toLowerCase();
+    return prefixes.some(function (prefix) {
+      return target.indexOf('/' + prefix) >= 0 || title.indexOf(prefix) >= 0;
+    });
+  }).slice(0, 3).map(function (item, index) {
+    const image = firstNonEmpty(item.backdrop, item.poster, item.thumbnailURL);
+    return {
+      id: item.id,
+      title: item.title,
+      type: item.type || 'movie',
+      rank: index + 1,
+      poster: image,
+      backdrop: image,
+      thumbnailURL: image,
+      aspectRatio: '16:9',
+      action: item.action
+    };
+  });
+}
+
+function categoryMatchesItem(item, category) {
+  if (!category || !category.detailSlugPattern) return true;
+  const target = stringValue(item && item.action && (item.action.url || item.action.itemId || item.action.id));
+  const slug = categorySlug(pathOf(target)).toLowerCase();
+  try {
+    return new RegExp(category.detailSlugPattern, 'i').test(slug);
+  } catch (error) {
+    return true;
+  }
+}
+
+function filterCategoryItems(items, category) {
+  if (!category || !category.detailSlugPattern) return items || [];
+  return (items || []).filter(function (item) {
+    return categoryMatchesItem(item, category);
+  });
 }
 
 async function getHomeSection(ctx) {
   ctx = normalizeContext(ctx);
   const sectionId = stringValue(ctx && (ctx.sectionId || ctx.id));
+  const categoryGroup = categoryGroupFromSectionId(sectionId);
+  if (categoryGroup) return loadCategoryGroupSection(ctx, categoryGroup);
   const section = findSection(sectionId) || MISSAV_SECTIONS[0];
   if (section.personalizedHome) return personalizedRecommendationSection(ctx, section);
   const url = categoryURL(ctx, section.path);
   try {
     const html = await fetchText(ctx, url, entryURL(ctx));
+    const items = filterCategoryItems(
+      parseCards(mediaListBlock(html), section.title, ctx),
+      section
+    ).slice(0, 18);
+    rememberCategoryArtwork(ctx, section.id, items);
     return {
       id: section.id,
       title: section.title,
       style: section.style,
       lazy: false,
       moreAction: categoryAction(ctx, section),
-      items: parseCards(html, section.title, ctx).slice(0, 18)
+      items: items
     };
   } catch (error) {
     return verificationSection(ctx, section.id, section.title, section.style, url, error);
+  }
+}
+
+function categoryGroupFromSectionId(sectionId) {
+  const value = stringValue(sectionId);
+  const match = /^missav-categories-([a-z]+)(?:-(\d+))?$/.exec(value);
+  if (!match) return null;
+  const group = MISSAV_CATEGORY_GROUPS.find(function (item) {
+    return item.id === match[1];
+  });
+  if (!group) return null;
+  const partNumber = Math.max(1, Number(match[2] || 1));
+  const categories = MISSAV_SECTIONS.filter(function (category) {
+    return category.group === group.id;
+  }).slice((partNumber - 1) * 6, partNumber * 6);
+  if (!categories.length) return null;
+  return {
+    id: value,
+    title: group.title + (partNumber > 1 ? '（续 ' + (partNumber - 1) + '）' : ''),
+    categories: categories
+  };
+}
+
+async function loadCategoryGroupSection(ctx, groupSection) {
+  const artwork = {};
+  const categories = groupSection.categories || [];
+  for (let offset = 0; offset < categories.length; offset += 2) {
+    const batch = categories.slice(offset, offset + 2);
+    const results = await Promise.all(batch.map(function (category) {
+      return loadCategoryPreviewItems(ctx, category);
+    }));
+    batch.forEach(function (category, index) {
+      artwork[category.id] = results[index];
+    });
+  }
+  return {
+    id: groupSection.id,
+    title: groupSection.title,
+    style: 'discover.annualWidePreview',
+    lazy: false,
+    items: categories.map(function (category) {
+      return categoryCard(ctx, category, artwork[category.id]);
+    })
+  };
+}
+
+async function loadCategoryPreviewItems(ctx, category) {
+  const cached = categoryPreviewItems(cachedCategoryArtwork(ctx, category.id), category);
+  if (cached.length >= 3) return cached;
+  try {
+    const url = categoryURL(ctx, category.path);
+    let html;
+    if (category.personalizedHome) {
+      html = await fetchText(ctx, entryURL(ctx), entryURL(ctx));
+    } else if (category.categoryIndex && isActressIndexURL(url)) {
+      html = await fetchActressIndexText(ctx, url, entryURL(ctx));
+    } else {
+      html = await fetchText(ctx, url, entryURL(ctx));
+    }
+    let items;
+    if (category.personalizedHome) {
+      items = parseCards(sectionBlock(html, category.title), category.title, ctx);
+      if (!items.length) items = parseCards(mediaListBlock(html), category.title, ctx);
+    } else if (category.categoryIndex) {
+      items = parseCategoryCards(ctx, html, category.title);
+      if (!items.length) items = parseCards(mediaListBlock(html), category.title, ctx);
+    } else {
+      items = filterCategoryItems(
+        parseCards(mediaListBlock(html), category.title, ctx),
+        category
+      );
+    }
+    const previews = categoryPreviewItems(items, category);
+    if (previews.length) rememberCategoryArtwork(ctx, category.id, previews);
+    return previews;
+  } catch (error) {
+    return cached;
   }
 }
 
@@ -325,6 +517,7 @@ async function personalizedRecommendationSection(ctx, section) {
       return verificationSection(ctx, section.id, section.title, section.style, homeURL, error);
     }
   }
+  rememberCategoryArtwork(ctx, section.id, items);
   return {
     id: section.id,
     title: section.title,
@@ -352,20 +545,25 @@ async function getCategory(ctx) {
   try {
     html = isActressWorksURL(url)
       ? await fetchActressCategoryText(ctx, url, entryURL(ctx))
-      : await fetchText(ctx, url, entryURL(ctx));
+      : isActressIndexURL(url)
+        ? await fetchActressIndexText(ctx, url, entryURL(ctx))
+        : await fetchText(ctx, url, entryURL(ctx));
   } catch (error) {
     return verificationCategory(ctx, pageId, section ? section.title : primary ? primary.title : '需要验证', url, error, page);
   }
   const title = section ? section.title : primary ? primary.title : pageTitle(html) || 'MissAV';
   const categoryIndex = !!(section && section.categoryIndex);
   const categoryItems = categoryIndex ? parseCategoryCards(ctx, html, title) : [];
-  const items = categoryItems.length ? [] : parseCards(html, title, ctx);
+  const items = categoryItems.length
+    ? []
+    : filterCategoryItems(parseCards(mediaListBlock(html), title, ctx), section);
   const fallbackCategoryItems = items.length || categoryItems.length ? [] : parseCategoryCards(ctx, html, title);
   const listItems = items.length
     ? items
     : categoryItems.length
       ? categoryItems
       : fallbackCategoryItems;
+  if (section && items.length) rememberCategoryArtwork(ctx, section.id, items);
   const pagination = section && section.randomCategory
     ? { hasMore: true, totalPages: 99 }
     : section && section.id === 'actress-ranking'
@@ -838,12 +1036,18 @@ function isActressWorksURL(url) {
     !/\/actresses\/ranking$/i.test(path);
 }
 
+function isActressIndexURL(url) {
+  const path = pathOf(url).split('?')[0].replace(/\/+$/, '');
+  return /\/(?:dm\d+\/)?cn\/actresses(?:\/ranking)?$/i.test(path);
+}
+
 async function fetchActressCategoryText(ctx, url, referer) {
   const cached = getCachedText(ctx, url);
   if (cached) return cached;
 
   const fastContext = Object.assign({}, ctx || {}, {
-    requestTimeoutSeconds: Math.min(numberParam(ctx, 'requestTimeoutSeconds', 45), 12)
+    requestTimeoutSeconds: Math.min(numberParam(ctx, 'requestTimeoutSeconds', 45), 12),
+    suppressBrowserFailureCooldown: true
   });
 
   let lastError = null;
@@ -874,6 +1078,43 @@ async function fetchActressCategoryText(ctx, url, referer) {
 
   throw new Error(
     '女优作品页读取失败。已短暂尝试复用刚才的验证状态，请点击一次真人验证后重试。' +
+    (lastError && lastError.message ? ' 原因：' + lastError.message : '')
+  );
+}
+
+async function fetchActressIndexText(ctx, url, referer) {
+  const cached = getCachedText(ctx, url);
+  if (cached && isVerifiedTargetHTML(ctx, url, cached)) return cached;
+
+  const fastContext = Object.assign({}, ctx || {}, {
+    requestTimeoutSeconds: Math.min(numberParam(ctx, 'requestTimeoutSeconds', 45), 12),
+    suppressBrowserFailureCooldown: true
+  });
+  let lastError = null;
+  try {
+    const options = requestOptions(fastContext, referer || url);
+    options.useBrowserFallback = false;
+    options.browserFallback = false;
+    options.allowBrowserFallback = false;
+    const response = await httpGet(url, options);
+    const text = responseText(response);
+    if (isVerifiedTargetHTML(fastContext, url, text)) {
+      setCachedText(ctx, url, text);
+      return text;
+    }
+    throw new Error('HTTP ' + (response && response.status ? response.status : 'empty'));
+  } catch (error) {
+    lastError = error;
+  }
+
+  const browserText = await browserHTML(fastContext, url, referer || url);
+  if (isVerifiedTargetHTML(fastContext, url, browserText)) {
+    setCachedText(ctx, url, browserText);
+    return browserText;
+  }
+
+  throw new Error(
+    '女优目录读取失败。已短暂尝试复用浏览器验证状态，请手动完成一次真人验证。' +
     (lastError && lastError.message ? ' 原因：' + lastError.message : '')
   );
 }
@@ -1029,7 +1270,10 @@ async function browserHTML(ctx, url, referer, forceVisible) {
 }
 
 function browserFailureKey(url) {
-  return 'missav:browser-failure:' + originOf(url);
+  const scope = isActressWorksURL(url) || isActressIndexURL(url)
+    ? pathOf(url).split('?')[0].replace(/\/+$/, '')
+    : '';
+  return 'missav:browser-failure:' + originOf(url) + (scope ? ':' + scope : '');
 }
 
 function browserRetryBlocked(ctx, url) {
@@ -1038,6 +1282,7 @@ function browserRetryBlocked(ctx, url) {
 }
 
 function rememberBrowserFailure(ctx, url) {
+  if (boolParam(ctx, 'suppressBrowserFailureCooldown', false)) return;
   const minutes = Math.max(0, numberParam(ctx, 'verificationCooldownMinutes', 10));
   if (!minutes) return;
   cacheSet(browserFailureKey(url), { retryAfter: Date.now() + minutes * 60 * 1000 });
@@ -1134,8 +1379,40 @@ function cacheKey(url) {
   return 'missav:html:' + String(url || '');
 }
 
+function categoryArtworkKey(ctx, pageId) {
+  return 'missav:category-artwork:v4:' + baseURL(ctx) + ':' + String(pageId || '');
+}
+
+function rememberCategoryArtwork(ctx, pageId, items) {
+  const previews = categoryPreviewItems(items, findSection(pageId));
+  if (!previews.length) return;
+  const key = categoryArtworkKey(ctx, pageId);
+  const value = {
+    items: previews,
+    expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000
+  };
+  memoryCache()[key] = value;
+  cacheSet(key, value);
+}
+
+function cachedCategoryArtwork(ctx, pageId) {
+  const key = categoryArtworkKey(ctx, pageId);
+  const now = Date.now();
+  let value = memoryCache()[key] || cacheGet(key);
+  if (typeof value === 'string') {
+    try {
+      value = JSON.parse(value);
+    } catch (error) {
+      value = null;
+    }
+  }
+  if (!value || value.expiresAt <= now || !Array.isArray(value.items)) return [];
+  memoryCache()[key] = value;
+  return value.items;
+}
+
 function categoryStateKey(ctx, pageId) {
-  return 'missav:category-state:v4:' + baseURL(ctx) + ':' + String(pageId || '');
+  return 'missav:category-state:v6:' + baseURL(ctx) + ':' + String(pageId || '');
 }
 
 function memoryCache() {
@@ -1272,7 +1549,9 @@ function getCachedText(ctx, url) {
 
 function setCachedText(ctx, url, text) {
   if (!isUsableHTML(text)) return;
-  const ttl = numberParam(ctx, 'cacheMinutes', 20) * 60 * 1000;
+  const configuredMinutes = numberParam(ctx, 'cacheMinutes', 20);
+  const minimumMinutes = isActressIndexURL(url) ? 60 : isActressWorksURL(url) ? 30 : 0;
+  const ttl = Math.max(configuredMinutes, minimumMinutes) * 60 * 1000;
   if (ttl <= 0) return;
   const value = { text: text, expiresAt: Date.now() + ttl };
   const key = cacheKey(url);
@@ -1499,7 +1778,8 @@ async function runVerificationCategory(ctx, pageId, url) {
   const ok = isVerifiedTargetHTML(ctx, url, html);
   if (ok) {
     setCachedText(ctx, url, html);
-    if (isActressWorksURL(url)) {
+    if (isActressWorksURL(url) || isActressIndexURL(url)) {
+      resetCategoryState(ctx, normalizePageId(ctx, url));
       return resumeVerifiedCategory(ctx, pageId, url, 1);
     }
   }
@@ -1545,45 +1825,22 @@ async function resumeVerifiedCategory(ctx, verificationPageId, targetURL, page) 
   let result = await getCategory(resumedContext);
   result.id = stablePageId;
   result.verificationTarget = targetURL;
-
-  // The first actress page contains 12 works. Prefetch page 2 after a visible
-  // verification so baiPlay returns to a normal, pageable category instead of
-  // showing 12 works plus a second verification card.
-  if (
-    page === 1 &&
-    isActressWorksURL(targetURL) &&
-    result.items &&
-    result.items.length &&
-    result.hasMore &&
-    Number(result.page || 1) === 1
-  ) {
-    const prefetched = await prefetchActressWorksPage(ctx, stablePageId, targetURL, 2);
-    if (prefetched) {
-      result = await getCategory(resumedContext);
-      result.id = stablePageId;
-      result.verificationTarget = targetURL;
-    }
-  }
   return result;
 }
 
-async function prefetchActressWorksPage(ctx, pageId, targetURL, page) {
-  try {
-    const url = pagedURL(targetURL, page);
-    const html = await fetchActressCategoryText(ctx, url, targetURL);
-    const items = parseCards(html, pageTitle(html) || '女优作品', ctx);
-    if (!items.length) return false;
-    rememberCategoryPage(ctx, pageId, page, items, paginationInfo(html, page, items.length));
-    return true;
-  } catch (error) {
-    return false;
-  }
+function resetCategoryState(ctx, pageId) {
+  const key = categoryStateKey(ctx, pageId);
+  delete memoryCache()[key];
+  cacheSet(key, { pages: {}, expiresAt: 0 });
 }
 
 function isVerifiedTargetHTML(ctx, url, html) {
   if (!isUsableHTML(html)) return false;
   if (isActressWorksURL(url)) {
     return parseCards(html, pageTitle(html) || '女优作品', ctx).length > 0;
+  }
+  if (isActressIndexURL(url)) {
+    return parseCategoryCards(ctx, html, /\/ranking$/i.test(pathOf(url)) ? '女优排行' : '女优一览').length > 0;
   }
   return true;
 }
@@ -1737,6 +1994,25 @@ function parseCards(html, fallbackTitle, ctx) {
     items.push(item);
   });
   return items;
+}
+
+function mediaListBlock(html) {
+  const source = String(html || '');
+  if (!source) return source;
+  const anchorPattern = /<a\b([^>]*)>([\s\S]*?)<\/a>/gi;
+  let match;
+  let firstMediaIndex = -1;
+  while ((match = anchorPattern.exec(source))) {
+    if (!isDetailHref(attr(match[1], 'href'))) continue;
+    firstMediaIndex = match.index;
+    break;
+  }
+  if (firstMediaIndex < 0) return source;
+  const headingIndex = source.lastIndexOf('<h1', firstMediaIndex);
+  const mainIndex = source.lastIndexOf('<main', firstMediaIndex);
+  const start = Math.max(headingIndex, mainIndex, 0);
+  const footerIndex = source.indexOf('<footer', firstMediaIndex);
+  return source.slice(start, footerIndex > firstMediaIndex ? footerIndex : undefined);
 }
 
 function mediaBlocks(html) {
@@ -2107,9 +2383,9 @@ function playbackResult(ctx, url, referer) {
 function extractPlayableURL(html) {
   const source = decodeEscapes(String(html || '') + '\n' + unpackPackedScripts(html).join('\n'));
   return firstPlayable(
+    firstMatch(source, /\bsource\s*=\s*["']([^"']+\.(?:m3u8|mp4|mpd)[^"']*)["']/i),
     firstMatch(source, /source1280\s*=\s*["']([^"']+\.(?:m3u8|mp4|mpd)[^"']*)["']/i),
     firstMatch(source, /source842\s*=\s*["']([^"']+\.(?:m3u8|mp4|mpd)[^"']*)["']/i),
-    firstMatch(source, /source\s*=\s*["']([^"']+\.(?:m3u8|mp4|mpd)[^"']*)["']/i),
     firstMatch(source, /var\s+hlsUrl\s*=\s*["']([^"']+\.(?:m3u8|mp4|mpd)[^"']*)["']/i),
     firstMatch(source, /<video\b[^>]*\b(?:data-src|src)\s*=\s*["']([^"']+\.(?:m3u8|mp4|mpd)[^"']*)["']/i),
     firstMatch(source, /source\s+src\s*=\s*["']([^"']+\.(?:m3u8|mp4|mpd)[^"']*)["']/i),
@@ -2310,11 +2586,14 @@ function isDetailHref(href) {
   if (parts.length !== 1) return false;
   const slug = parts[0] || '';
   if (/^(?:new|release|random|search|history|playlists?|saved|favorite|login|register|vip)$/i.test(slug)) return false;
-  // Most MissAV codes use a hyphen (for example abc-123), but Gachinco
-  // publishes codes such as gachip140 and gachi1083 without one.
-  return /^[a-z0-9]+(?:-[a-z0-9]+)*$/i.test(slug) &&
+  // Most MissAV codes use a hyphen (for example abc-123), while the
+  // 1pondo/Caribbeancompr/10musume/pacopacomama feeds use date-based
+  // underscore IDs such as pondo-072526_001 and 051726_001.
+  const standardCode = /^[a-z0-9]+(?:[-_][a-z0-9]+)*$/i.test(slug) &&
     /[a-z]/i.test(slug) &&
     /\d/.test(slug);
+  const dateOnlyCode = /^\d{6}_\d{2,3}$/i.test(slug);
+  return standardCode || dateOnlyCode;
 }
 
 function categorySlug(value) {
