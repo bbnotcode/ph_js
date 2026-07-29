@@ -11,13 +11,13 @@ const WidgetMetadata = {
   id: '123av-mini-library',
   name: '123AV',
   title: '123AV',
-  version: '1.0.0',
+  version: '1.1.0',
   requiredVersion: '0.0.1',
-  author: 'EL / Codex',
+  author: 'Alan huang',
   site: AV123_DEFAULT_BASE,
   logo: AV123_LOGO,
   icon: AV123_LOGO,
-  description: '123AV 自定义媒体库，支持首页、分类、搜索、详情和 surrit.store 播放解析。'
+  description: '123AV 自定义媒体库，支持首页、分类、搜索、详情和动态播放器解析。'
 };
 
 const AV123_SECTIONS = [
@@ -185,11 +185,11 @@ async function getDetail(ctx) {
   const recommendations = parseCards(ctx, html).filter(function (item) {
     return detailURLFromItem(item) !== detailUrl;
   }).slice(0, 12);
-  const resourceGroups = playbackGroups(detailUrl, title || code, parsedPlayer.surritCode, parsedPlayer.playUrl, ctx);
+  const resourceGroups = playbackGroups(detailUrl, title || code, parsedPlayer.surritCode, parsedPlayer.playerUrl, parsedPlayer.playUrl, ctx);
 
   return {
     pageType: 'detail',
-    id: encodeDetailPayload({ url: detailUrl, title: title, surritCode: parsedPlayer.surritCode, playUrl: parsedPlayer.playUrl }),
+    id: encodeDetailPayload({ url: detailUrl, title: title, surritCode: parsedPlayer.surritCode, playerUrl: parsedPlayer.playerUrl, playUrl: parsedPlayer.playUrl }),
     title: title || code,
     originalTitle: code && title && code !== title ? code : undefined,
     type: 'movie',
@@ -242,34 +242,37 @@ async function getDetail(ctx) {
 async function getResourceVersions(ctx) {
   const direct = stringValue(ctx && (ctx.playUrl || ctx.url || ctx.videoUrl));
   if (isPlayableURL(direct)) {
-    return playbackGroups('', ctx && ctx.title, ctx && ctx.surritCode, direct, ctx);
+    return playbackGroups('', ctx && ctx.title, ctx && ctx.surritCode, ctx && ctx.playerUrl, direct, ctx);
   }
   const detailUrl = detailURLFromContext(ctx);
-  if (!detailUrl) return playbackGroups('', ctx && ctx.title, ctx && ctx.surritCode, '', ctx);
+  if (!detailUrl) return playbackGroups('', ctx && ctx.title, ctx && ctx.surritCode, ctx && ctx.playerUrl, '', ctx);
   try {
     const html = await fetchText(ctx, detailUrl);
     const parsedPlayer = parsePlayerData(ctx, html);
-    return playbackGroups(detailUrl, ctx && ctx.title, parsedPlayer.surritCode, parsedPlayer.playUrl, ctx);
+    return playbackGroups(detailUrl, ctx && ctx.title, parsedPlayer.surritCode, parsedPlayer.playerUrl, parsedPlayer.playUrl, ctx);
   } catch (error) {
-    return playbackGroups(detailUrl, ctx && ctx.title, ctx && ctx.surritCode, '', ctx);
+    return playbackGroups(detailUrl, ctx && ctx.title, ctx && ctx.surritCode, ctx && ctx.playerUrl, '', ctx);
   }
 }
 
 async function resolvePlayback(ctx) {
-  const direct = firstNonEmpty(ctx && ctx.playUrl, ctx && ctx.url, ctx && ctx.videoUrl);
+  const decoded = decodeDetailPayload(ctx && (ctx.versionId || ctx.itemId || ctx.id));
+  const direct = firstNonEmpty(ctx && ctx.playUrl, ctx && ctx.url, ctx && ctx.videoUrl, decoded.playUrl);
   if (isPlayableURL(direct) && !isDetailURL(direct)) {
     return playbackResult(ctx, direct);
   }
 
-  let surritCode = stringValue(ctx && ctx.surritCode);
+  let surritCode = firstNonEmpty(ctx && ctx.surritCode, decoded.surritCode);
+  let playerUrl = firstNonEmpty(ctx && ctx.playerUrl, decoded.playerUrl);
   let detailUrl = detailURLFromContext(ctx);
-  if (!surritCode && detailUrl) {
+  if ((!surritCode || !playerUrl) && detailUrl) {
     const html = await fetchText(ctx, detailUrl);
     const parsedPlayer = parsePlayerData(ctx, html);
     surritCode = parsedPlayer.surritCode;
+    playerUrl = parsedPlayer.playerUrl;
     if (parsedPlayer.playUrl) return playbackResult(ctx, parsedPlayer.playUrl);
   }
-  const playUrl = await getPlayableURL(ctx, surritCode);
+  const playUrl = await getPlayableURL(ctx, surritCode, playerUrl);
   if (!playUrl) throw new Error('未能解析到 123AV 播放地址。源站播放器或 surrit.store 接口可能已变化。');
   return playbackResult(ctx, playUrl);
 }
@@ -444,7 +447,7 @@ function parseCards(ctx, html) {
 function parsePlayerData(ctx, html) {
   const source = String(html || '');
   const raw = firstMatch(source, /x-data=["']player\(JSON\.parse\('([^']+)'\)/i);
-  const result = { surritCode: '', poster: '', playUrl: '' };
+  const result = { surritCode: '', playerUrl: '', poster: '', playUrl: '' };
   if (!raw) return result;
   try {
     const jsonText = decodeEscapes(raw);
@@ -457,6 +460,7 @@ function parsePlayerData(ctx, html) {
     );
     result.poster = poster ? absoluteURL(ctx, decodeURIComponentSafe(poster)) : '';
     result.surritCode = firstMatch(embedUrl, /\/e\/([a-z0-9_]+)/i);
+    result.playerUrl = /^https?:\/\/[^/]+\/e\/[a-z0-9_]+/i.test(embedUrl) ? embedUrl : '';
     result.playUrl = isPlayableURL(embedUrl) ? embedUrl : '';
   } catch (error) {
     return result;
@@ -464,25 +468,49 @@ function parsePlayerData(ctx, html) {
   return result;
 }
 
-async function getPlayableURL(ctx, surritCode) {
+async function getPlayableURL(ctx, surritCode, playerUrl) {
   if (!surritCode) return '';
-  const apiUrl = surritBaseURL(ctx) + '/stream?id=' + encodeURIComponent(surritCode);
+  const parsedPlayerUrl = parseAbsoluteURL(playerUrl);
+  const playerBase = parsedPlayerUrl ? parsedPlayerUrl.origin : surritBaseURL(ctx);
+  const playerReferer = parsedPlayerUrl ? parsedPlayerUrl.href : playerBase + '/e/' + surritCode;
+  const poster = parsedPlayerUrl ? parsedPlayerUrl.searchParams.get('poster') : '';
+  let apiUrl = playerBase + '/stream?id=' + encodeURIComponent(surritCode);
+  if (poster) apiUrl += '&poster=' + encodeURIComponent(poster);
   const response = await httpGet(apiUrl, {
     headers: {
       'User-Agent': AV123_UA,
-      Referer: surritBaseURL(ctx) + '/e/' + surritCode
+      Accept: 'application/json, text/plain, */*',
+      Referer: playerReferer
     }
   });
   const data = responseData(response);
-  const parsed = typeof data === 'string' ? JSON.parse(data) : data;
+  const status = responseStatus(response);
+  const contentType = responseHeader(response, 'content-type');
+  if (status && (status < 200 || status >= 300)) {
+    throw new Error('播放器接口请求失败（HTTP ' + status + '）');
+  }
+  let parsed = data;
+  if (typeof data === 'string') {
+    const text = data.trim();
+    if (!text) throw new Error('播放器接口返回空响应');
+    if (text.charAt(0) === '<' || /text\/html/i.test(contentType)) {
+      throw new Error('播放器接口返回了网页而不是 JSON；播放器域名可能已变更');
+    }
+    try {
+      parsed = JSON.parse(text);
+    } catch (error) {
+      throw new Error('播放器接口返回格式无效，无法解析播放地址');
+    }
+  }
   return parsed && parsed.status === 'ok' && parsed.media && parsed.media.stream ? parsed.media.stream : '';
 }
 
-function playbackGroups(detailUrl, title, surritCode, playUrl, ctx) {
+function playbackGroups(detailUrl, title, surritCode, playerUrl, playUrl, ctx) {
   const payload = {
     url: detailUrl || '',
     title: title || '123AV HLS',
     surritCode: surritCode || '',
+    playerUrl: playerUrl || '',
     playUrl: playUrl || ''
   };
   return [
@@ -494,7 +522,7 @@ function playbackGroups(detailUrl, title, surritCode, playUrl, ctx) {
           id: encodeDetailPayload(payload),
           name: '123AV HLS',
           displayName: '123AV HLS',
-          subtitle: surritCode ? 'surrit.store' : '详情页解析',
+          subtitle: playerUrl ? playerHost(playerUrl) : (surritCode ? '播放器接口' : '详情页解析'),
           container: 'm3u8',
           protocol: 'hls',
           url: playUrl || '',
@@ -505,7 +533,8 @@ function playbackGroups(detailUrl, title, surritCode, playUrl, ctx) {
             versionId: encodeDetailPayload(payload),
             title: title || '123AV HLS',
             url: playUrl || undefined,
-            surritCode: surritCode || undefined
+            surritCode: surritCode || undefined,
+            playerUrl: playerUrl || undefined
           }
         }
       ]
@@ -568,7 +597,8 @@ function categoryURL(ctx, endpoint, page, sortValue) {
 function detailURLFromContext(ctx) {
   if (!ctx) return '';
   const decoded = decodeDetailPayload(ctx.itemId || ctx.id || ctx.versionId || ctx.url || ctx.link);
-  const direct = firstNonEmpty(decoded.url, ctx.detailUrl, ctx.detailURL, ctx.pageUrl, ctx.link);
+  const contextDirect = firstNonEmpty(ctx.detailUrl, ctx.detailURL, ctx.pageUrl, ctx.link, ctx.itemId, ctx.id, ctx.versionId, ctx.url);
+  const direct = firstNonEmpty(decoded.url, isDetailURL(contextDirect) ? contextDirect : '');
   if (direct && isDetailURL(direct)) return direct;
   const slug = firstNonEmpty(decoded.slug, ctx.slug, ctx.itemId, ctx.id);
   if (slug && !String(slug).match(/^123av:\/\//i) && !String(slug).match(/^https?:\/\//i)) {
@@ -665,9 +695,11 @@ function imageHeaders(ctx, referer) {
 }
 
 function playbackHeaders(ctx) {
+  const decoded = decodeDetailPayload(ctx && (ctx.versionId || ctx.itemId || ctx.id));
+  const playerUrl = firstNonEmpty(ctx && ctx.playerUrl, decoded.playerUrl);
   return {
     'User-Agent': AV123_UA,
-    Referer: surritBaseURL(ctx) + '/'
+    Referer: playerUrl || surritBaseURL(ctx) + '/'
   };
 }
 
@@ -715,6 +747,47 @@ function responseData(response) {
   if (response.body !== undefined) return response.body;
   if (response.text !== undefined) return response.text;
   return response;
+}
+
+function responseStatus(response) {
+  return Number(response && (response.status || response.statusCode || response.code)) || 0;
+}
+
+function responseHeader(response, name) {
+  const headers = response && response.headers;
+  if (!headers) return '';
+  if (typeof headers.get === 'function') return stringValue(headers.get(name));
+  const wanted = String(name || '').toLowerCase();
+  const keys = Object.keys(headers);
+  for (let index = 0; index < keys.length; index += 1) {
+    if (keys[index].toLowerCase() === wanted) return stringValue(headers[keys[index]]);
+  }
+  return '';
+}
+
+function parseAbsoluteURL(value) {
+  const text = stringValue(value);
+  const match = text.match(/^(https?:\/\/[^/?#]+)([^?#]*)?(\?[^#]*)?/i);
+  if (!match) return null;
+  return {
+    origin: match[1],
+    href: text,
+    searchParams: {
+      get: function (key) {
+        const query = String(match[3] || '').replace(/^\?/, '').split('&');
+        for (let index = 0; index < query.length; index += 1) {
+          const pair = query[index].split('=');
+          if (decodeURIComponentSafe(pair.shift()) === key) return decodeURIComponentSafe(pair.join('='));
+        }
+        return '';
+      }
+    }
+  };
+}
+
+function playerHost(value) {
+  const parsed = parseAbsoluteURL(value);
+  return parsed ? parsed.origin.replace(/^https?:\/\//i, '') : '播放器接口';
 }
 
 function isVerificationPage(html, status) {
