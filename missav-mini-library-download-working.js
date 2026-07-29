@@ -12,7 +12,7 @@ const WidgetMetadata = {
   id: 'missav-mini-library',
   name: 'MissAV',
   title: 'MissAV',
-  version: '1.5.4',
+  version: '1.5.6',
   author: 'Alan huang',
   logo: MISSAV_LOGO,
   icon: MISSAV_LOGO,
@@ -73,6 +73,29 @@ const MISSAV_CATEGORY_GROUPS = [
   { id: 'uncensored', title: '无码影片' },
   { id: 'asian', title: '亚洲 AV' }
 ];
+
+const MISSAV_CATEGORY_COVERS = {
+  recommended: 'https://fourhoi.com/meyd-532-uncensored-leak/cover-t.jpg',
+  nakadashi: 'https://fourhoi.com/start-612/cover-t.jpg',
+  'big-breasts': 'https://fourhoi.com/start-612/cover-t.jpg',
+  'married-women': 'https://fourhoi.com/sdnm-556/cover-t.jpg',
+  'new-release': 'https://fourhoi.com/fns-239/cover-t.jpg',
+  latest: 'https://fourhoi.com/sdmm-236/cover-t.jpg',
+  'uncensored-leak': 'https://fourhoi.com/fc2-ppv-4945925/cover-t.jpg',
+  random: 'https://fourhoi.com/mlw-2041/cover-t.jpg',
+  actresses: 'https://fourhoi.com/actress/26225-t.jpg',
+  'actress-ranking': 'https://fourhoi.com/actress/1054998-t.jpg',
+  caribbeancom: 'https://fourhoi.com/caribbeancom-072726-001/cover-t.jpg',
+  gachinco: 'https://fourhoi.com/gachip140/cover-t.jpg',
+  twav: 'https://fourhoi.com/twav-d001/cover-t.jpg'
+};
+
+const MISSAV_GROUP_COVERS = {
+  japanese: 'https://fourhoi.com/fns-239/cover-t.jpg',
+  amateur: 'https://fourhoi.com/start-612/cover-t.jpg',
+  uncensored: 'https://fourhoi.com/fc2-ppv-4945925/cover-t.jpg',
+  asian: 'https://fourhoi.com/twav-d001/cover-t.jpg'
+};
 
 const MISSAV_HOME_MEDIA_SECTION_IDS = [
   'recommended',
@@ -218,7 +241,8 @@ async function getHome(ctx) {
   const html = await safeFetch(ctx, entryURL(ctx), baseURL(ctx) + '/');
   const hero = parseCards(sectionBlock(html, '推荐给你'), '推荐给你', ctx).slice(0, 10).map(toWideItem);
   const mediaSections = homeMediaSections(ctx, parseHomeSections(ctx, html));
-  const sections = categoryGroupSections(ctx).concat(mediaSections);
+  const artwork = categoryArtworkFromSections(ctx, mediaSections);
+  const sections = categoryGroupSections(ctx, artwork).concat(mediaSections);
 
   return {
     pageType: 'home',
@@ -248,7 +272,7 @@ function homeMediaSections(ctx, parsedSections) {
   return sections;
 }
 
-function categoryGroupSections(ctx) {
+function categoryGroupSections(ctx, artwork) {
   const sections = [];
   MISSAV_CATEGORY_GROUPS.forEach(function (group) {
     const categories = MISSAV_SECTIONS.filter(function (category) {
@@ -259,10 +283,10 @@ function categoryGroupSections(ctx) {
       sections.push({
         id: 'missav-categories-' + group.id + (part ? '-' + (part + 1) : ''),
         title: group.title + (part ? '（续 ' + part + '）' : ''),
-        style: 'discover.annualCategories',
+        style: 'discover.annualWidePreview',
         lazy: false,
         items: categories.slice(offset, offset + 6).map(function (category) {
-          return categoryCard(ctx, category);
+          return categoryCard(ctx, category, artwork && artwork[category.id]);
         })
       });
     }
@@ -270,14 +294,27 @@ function categoryGroupSections(ctx) {
   return sections;
 }
 
-function categoryCard(ctx, category) {
-  return {
+function categoryCard(ctx, category, livePreviewItems) {
+  const cachedPreviewItems = cachedCategoryArtwork(ctx, category.id);
+  const previewItems = categoryPreviewItems(
+    livePreviewItems && livePreviewItems.length
+      ? livePreviewItems
+      : cachedPreviewItems.length
+        ? cachedPreviewItems
+        : [fallbackCategoryPreview(ctx, category)]
+  );
+  const cover = previewItems[0] && firstNonEmpty(
+    previewItems[0].backdrop,
+    previewItems[0].poster,
+    previewItems[0].thumbnailURL
+  );
+  const item = {
     id: 'category-' + category.id,
     title: category.title,
-    subtitle: category.subtitle || '',
+    subtitle: category.subtitle || '浏览' + category.title + '相关内容',
     type: 'category',
     aspectRatio: '16:9',
-    previewItems: [],
+    previewItems: previewItems,
     action: {
       type: 'category',
       id: category.id,
@@ -287,6 +324,74 @@ function categoryCard(ctx, category) {
       itemAspectRatio: '16:9'
     }
   };
+  if (cover) {
+    item.poster = cover;
+    item.backdrop = cover;
+    item.thumbnailURL = cover;
+    item.posterPath = cover;
+    item.backdropPath = cover;
+    item.image = cover;
+    item.imageURL = cover;
+    item.posterURL = cover;
+    item.backdropURL = cover;
+    item.cover = cover;
+    item.coverURL = cover;
+    item.imageFit = 'fill';
+    item.imageHeaders = imageHeaders(ctx, categoryURL(ctx, category.path));
+    item.posterHeaders = item.imageHeaders;
+    item.backdropHeaders = item.imageHeaders;
+  }
+  return item;
+}
+
+function fallbackCategoryPreview(ctx, category) {
+  const image = MISSAV_CATEGORY_COVERS[category.id] || MISSAV_GROUP_COVERS[category.group] || MISSAV_LOGO;
+  return {
+    id: 'category-preview-' + category.id,
+    title: category.title,
+    type: 'collection',
+    poster: image,
+    backdrop: image,
+    thumbnailURL: image,
+    aspectRatio: '16:9',
+    action: {
+      type: 'category',
+      id: category.id,
+      pageId: category.id,
+      title: category.title,
+      url: categoryURL(ctx, category.path)
+    }
+  };
+}
+
+function categoryArtworkFromSections(ctx, sections) {
+  const artwork = {};
+  (sections || []).forEach(function (section) {
+    if (!section || !section.id || !section.items || !section.items.length) return;
+    const previews = categoryPreviewItems(section.items);
+    if (!previews.length) return;
+    artwork[section.id] = previews;
+    rememberCategoryArtwork(ctx, section.id, previews);
+  });
+  return artwork;
+}
+
+function categoryPreviewItems(items) {
+  return (items || []).filter(function (item) {
+    return !!(item && firstNonEmpty(item.backdrop, item.poster, item.thumbnailURL));
+  }).slice(0, 8).map(function (item) {
+    const image = firstNonEmpty(item.backdrop, item.poster, item.thumbnailURL);
+    return {
+      id: item.id,
+      title: item.title,
+      type: item.type || 'movie',
+      poster: image,
+      backdrop: image,
+      thumbnailURL: image,
+      aspectRatio: '16:9',
+      action: item.action
+    };
+  });
 }
 
 async function getHomeSection(ctx) {
@@ -297,13 +402,15 @@ async function getHomeSection(ctx) {
   const url = categoryURL(ctx, section.path);
   try {
     const html = await fetchText(ctx, url, entryURL(ctx));
+    const items = parseCards(html, section.title, ctx).slice(0, 18);
+    rememberCategoryArtwork(ctx, section.id, items);
     return {
       id: section.id,
       title: section.title,
       style: section.style,
       lazy: false,
       moreAction: categoryAction(ctx, section),
-      items: parseCards(html, section.title, ctx).slice(0, 18)
+      items: items
     };
   } catch (error) {
     return verificationSection(ctx, section.id, section.title, section.style, url, error);
@@ -325,6 +432,7 @@ async function personalizedRecommendationSection(ctx, section) {
       return verificationSection(ctx, section.id, section.title, section.style, homeURL, error);
     }
   }
+  rememberCategoryArtwork(ctx, section.id, items);
   return {
     id: section.id,
     title: section.title,
@@ -368,6 +476,7 @@ async function getCategory(ctx) {
     : categoryItems.length
       ? categoryItems
       : fallbackCategoryItems;
+  if (section && items.length) rememberCategoryArtwork(ctx, section.id, items);
   const pagination = section && section.randomCategory
     ? { hasMore: true, totalPages: 99 }
     : section && section.id === 'actress-ranking'
@@ -1181,6 +1290,38 @@ function backupBaseURLs(ctx) {
 
 function cacheKey(url) {
   return 'missav:html:' + String(url || '');
+}
+
+function categoryArtworkKey(ctx, pageId) {
+  return 'missav:category-artwork:v1:' + baseURL(ctx) + ':' + String(pageId || '');
+}
+
+function rememberCategoryArtwork(ctx, pageId, items) {
+  const previews = categoryPreviewItems(items);
+  if (!previews.length) return;
+  const key = categoryArtworkKey(ctx, pageId);
+  const value = {
+    items: previews,
+    expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000
+  };
+  memoryCache()[key] = value;
+  cacheSet(key, value);
+}
+
+function cachedCategoryArtwork(ctx, pageId) {
+  const key = categoryArtworkKey(ctx, pageId);
+  const now = Date.now();
+  let value = memoryCache()[key] || cacheGet(key);
+  if (typeof value === 'string') {
+    try {
+      value = JSON.parse(value);
+    } catch (error) {
+      value = null;
+    }
+  }
+  if (!value || value.expiresAt <= now || !Array.isArray(value.items)) return [];
+  memoryCache()[key] = value;
+  return value.items;
 }
 
 function categoryStateKey(ctx, pageId) {
