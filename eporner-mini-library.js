@@ -1,7 +1,7 @@
 /**
  * EPORNER - Dreamby / baiPlay 自定义媒体库
  * Source: https://www.eporner.com/
- * Version: 1.0.8
+ * Version: 1.0.9
  */
 
 const EP_SITE = "https://www.eporner.com";
@@ -193,8 +193,8 @@ function getManifest() {
     id: "eporner-mini-library",
     name: "EPORNER",
     title: "EPORNER",
-    version: "1.0.8",
-    author: "Codex",
+    version: "1.0.9",
+    author: "Alan huang",
     logo: EP_LOGO,
     icon: EP_LOGO,
     site: EP_SITE,
@@ -300,7 +300,7 @@ function buildVersions(id, sourceData) {
     const leftHeight = resolutionNumber(left[1]?.labelShort || left[0]);
     const rightHeight = resolutionNumber(right[1]?.labelShort || right[0]);
     return rightHeight - leftHeight;
-  }).filter(function (entry) { return resolutionNumber(entry[1]?.labelShort || entry[0]) >= 2160; });
+  });
   const hasHLS = !!sourceData?.sources?.hls?.auto?.src;
   const versions = mp4Entries.map(function (entry, index) {
     const key = entry[0];
@@ -310,7 +310,8 @@ function buildVersions(id, sourceData) {
     const sourceKey = hasHLS && height ? `quality:${height}:${key}` : `mp4:${key}`;
     return makeVersion(id, sourceKey, title, hasHLS && height ? "m3u8" : "mp4", index === 0);
   });
-  if (!versions.length) throw new Error("该视频没有可用的 4K（2160p）播放源");
+  if (!versions.length && hasHLS) versions.push(makeVersion(id, "hls", "自动（最高可用）", "m3u8", true));
+  if (!versions.length) throw new Error("该视频没有返回可用播放源");
   return versions;
 }
 
@@ -392,8 +393,7 @@ async function resolvePlayback(ctx) {
   const sourceData = await getSignedSources(id);
   const sortedMP4 = Object.entries(sourceData.sources?.mp4 || {}).sort(function (left, right) {
     return resolutionNumber(right[1]?.labelShort || right[0]) - resolutionNumber(left[1]?.labelShort || left[0]);
-  }).filter(function (entry) { return resolutionNumber(entry[1]?.labelShort || entry[0]) >= 2160; });
-  if (!sortedMP4.length) throw new Error("该视频没有可用的 4K（2160p）播放源");
+  });
   let source;
   if (descriptor.sourceKey === "hls") source = sourceData.sources?.hls?.auto;
   else if (descriptor.sourceKey.startsWith("mp4:")) source = sourceData.sources?.mp4?.[descriptor.sourceKey.slice(4)];
@@ -411,7 +411,7 @@ async function resolvePlayback(ctx) {
     if (!source?.src && fallbackKey) source = sourceData.sources?.mp4?.[fallbackKey];
     if (!source?.src) source = sortedMP4.find(function (entry) { return resolutionNumber(entry[1]?.labelShort || entry[0]) === requestedHeight; })?.[1];
   }
-  if (!source?.src) source = sortedMP4[0]?.[1];
+  if (!source?.src) source = sortedMP4[0]?.[1] || sourceData.sources?.hls?.auto;
   const url = source?.src || "";
   if (!url) throw new Error("没有解析到 EPORNER 播放地址");
   const isHLS = /\.m3u8(?:\?|$)/i.test(url) || /mpegurl/i.test(source?.type || "");
