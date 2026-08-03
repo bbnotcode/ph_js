@@ -1,0 +1,28 @@
+{
+  "apiVersion": 1,
+  "generatedAt": "2026-08-03T00:00:00Z",
+  "plugins": [
+    {
+      "pluginId": "stripchat",
+      "version": "1.0.0",
+      "changelog": [
+        "首个 AngelLive 插件版本",
+        "仅展示 Stripchat public 状态直播",
+        "播放时实时获取 HLS pkey 和画质"
+      ],
+      "platform": "stripchat",
+      "platformName": "Stripchat 直播",
+      "platformDescription": "Stripchat 公开直播源，支持分类、搜索、详情和多画质 HLS 播放。",
+      "zipURLs": [
+        "https://raw.githubusercontent.com/bbnotcode/ph_js/main/stripchat-angellive-1.0.0.zip"
+      ],
+      "sha256": "67d451f33b88ac50f2161aea8638db43cdadb7f3a9212f84786a993b824ecc09",
+      "auth": {
+        "required": false,
+        "credentialKinds": [],
+        "supportsStatusCheck": false,
+        "supportsValidation": false
+      }
+    }
+  ]
+}
