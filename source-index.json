@@ -13,6 +13,7 @@
       "platform": "stripchat",
       "platformName": "Stripchat 直播",
       "platformDescription": "Stripchat 公开直播源，支持分类、搜索、详情和多画质 HLS 播放。",
+      "icon": "https://assets.chapturist.com/assets/icons/favicon-512x512_stripchat.global.png?v=2609fcdf",
       "zipURLs": [
         "https://raw.githubusercontent.com/bbnotcode/ph_js/main/stripchat-angellive-1.0.0.zip"
       ],
