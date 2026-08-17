@@ -1,11 +1,12 @@
 {
   "apiVersion": 1,
-  "generatedAt": "2026-08-03T00:00:00Z",
+  "generatedAt": "2026-08-17T03:30:00Z",
   "plugins": [
     {
       "pluginId": "stripchat",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "changelog": [
+        "加入 AngelLive iOS/macOS 安装后平台图标",
         "首个 AngelLive 插件版本",
         "仅展示 Stripchat public 状态直播",
         "播放时实时获取 HLS pkey 和画质"
@@ -15,9 +16,9 @@
       "platformDescription": "Stripchat 公开直播源，支持分类、搜索、详情和多画质 HLS 播放。",
       "icon": "https://assets.chapturist.com/assets/icons/favicon-512x512_stripchat.global.png?v=2609fcdf",
       "zipURLs": [
-        "https://raw.githubusercontent.com/bbnotcode/ph_js/main/stripchat-angellive-1.0.0.zip"
+        "https://raw.githubusercontent.com/bbnotcode/ph_js/main/stripchat-angellive-1.0.1.zip"
       ],
-      "sha256": "67d451f33b88ac50f2161aea8638db43cdadb7f3a9212f84786a993b824ecc09",
+      "sha256": "f4ce0cd55d5fc54d7679c14675721ff32200aa71c5637e1f17b0b71e3a008f69",
       "auth": {
         "required": false,
         "credentialKinds": [],
