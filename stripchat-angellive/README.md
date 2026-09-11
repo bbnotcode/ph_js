@@ -7,7 +7,7 @@ AngelLive API v1 插件，仅枚举和播放 Stripchat `public` 状态的直播�
 - `manifest.json`：AngelLive 插件清单。
 - `main.js`：分类、房间、搜索、详情、状态和 HLS 播放实现。
 - `test.js`：`node test.js` 运行契约测试（含代理路径与直连回退路径）。
-- `stripchat-angellive-1.0.18.zip`：可安装插件包，包含 AngelLive 列表和首页平台卡片图标。
+- `stripchat-angellive-1.0.19.zip`：可安装插件包，包含 AngelLive 列表和首页平台卡片图标。
 - `worker/`：Cloudflare Worker 版解密代理源码。
 - `source-index.json`：AngelLive 订阅源索引。
 
@@ -28,26 +28,45 @@ AngelLive 对 `getPlayback` 有整体超时。旧版本最坏情况要串行等�
 - 解析失败的流做 **8 秒负缓存**，反复点击不会重跑整轮探测；
 - Worker 侧 `loadMaster` 也改成四域名并发 + 15 秒失败负缓存（最坏 36 秒 → 4.5 秒）。
 
-## 播放引擎：只允许 avPlayer
+## 播放引擎：mePlayer 主路，avPlayer 兜底（1.0.19 改回）
 
-AngelLive 有两个播放引擎：`avPlayer`（系统播放器）和 `mePlayer`（内置播放器）。
-两者对同一份清单的表现完全不同，同一台设备同一时段的抓包对比：
+AngelLive 有两个播放引擎：`avPlayer`（系统播放器 / KSAVPlayer）和 `mePlayer`（内置播放器 /
+KSMEPlayer）。宿主自己为**普通 HLS 直播**定的默认顺序是 `[mePlayer, avPlayer]`
+（`RoomPlaybackResolver.resolvePlan`），而本插件从 1.0.11 起一直把
+`playbackHints.preferredEngines` 写死成 `["avPlayer"]`，等于绕开了宿主的默认路径。
+
+**为什么当初写死 avPlayer。** 同一台设备同一时段的抓包对比：
 
 | 引擎 | 协议 | 特征请求头 | 结果 |
 | --- | --- | --- | --- |
 | avPlayer | HTTP/2 | `x-playback-session-id` | 40 个分片全部 200 |
 | mePlayer | HTTP/1.1 | `icy-metadata: 1`、`range: bytes=0-`、UA 重复两遍 | 8 个请求全部 400 |
 
-原因：**mePlayer 会把分片 URL 截断在约 190 字符**（`u` 参数从 136 字符被砍成 109 字符，
-base64 长度变成非法的 4k+1）。播放器拿不到分片就每秒重试一次，重试 8 次后整个播放线程
+原因是 **mePlayer 会把分片 URL 截断在约 190 字符**（`u` 参数从 136 字符被砍成 109 字符，
+base64 长度变成非法的 4k+1），播放器拿不到分片就每秒重试一次，重试 8 次后整个播放线程
 放弃，表现就是「前一两分钟很流畅，之后画面卡住不动」。
 
-因此这一版做了三件事：
+**为什么现在改回来。**
 
-- `playbackHints.preferredEngines` 固定为 `["avPlayer"]`，不给回退到 mePlayer 的机会；
-- 不再声明 `latencyMode: "lowLatency"`：低延迟模式只留 2~3 秒缓冲，任何抖动都直接断流；
-- Worker 侧把分片地址从 236 字符压到 **179 字符**（域名压成一位下标 + 去掉重复的
-  `/<streamId>/` 目录层），即使被降级到 mePlayer 也不会超过它的上限。
+1. **截断前提已经消失。** 1.0.15 之后走的是官方 CDN 直连分片地址，实测 12 个直播间、
+   51 条分片，**最长 107 字符**，离 190 的上限还很远。
+2. **写死 avPlayer 的代价是「没有任何自愈」。** 宿主 `PlaybackTuning.swift` 里写得很清楚：
+   `stallMonitoringEnabled` **「由内核决定（KSME 主路 true；KSAV/VLC false）」**。
+   也就是说 KSAVPlayer 这条路上零吞吐 watchdog 是**关着的**，`PlaybackRecoveryCoordinator`
+   的 tick 里对没有字节采样的内核直接 `return`（"无字节采样内核(HLS/KSAVPlayer)：卡顿由
+   EOF/error 经 finish 反馈，这里不判 stall"）。而这正是「其他订阅源的直播卡住后点一下
+   按钮就能恢复、Stripchat 不能」的原因——别的源走默认的 mePlayer，有起播超时、零吞吐
+   stall 检测和一整条恢复阶梯。
+3. **回退是安全的。** 顺序写成 `["mePlayer", "avPlayer"]`，mePlayer 起不来时
+   `KSPlayerLayer` 会按 `playerTypes` 顺序自动切到 avPlayer，最坏情况就是回到 1.0.18 的行为。
+
+同时保留的两条：
+
+- 不声明 `latencyMode: "lowLatency"`：低延迟模式只留 2~3 秒缓冲，任何抖动都直接断流；
+- Worker 侧分片地址仍然压到 179 字符以内，即使被降级到 mePlayer 也不会超过它的上限。
+
+> 如果换回 mePlayer 后起播反而变差，把 `main.js` 里 `preferredEngines` 改回 `["avPlayer"]`
+> 即可一键回退，其余逻辑不受影响。
 
 三种编码格式 Worker 都兼容，设备上残留的旧清单不会 404。
 
@@ -197,7 +216,7 @@ Stripchat 的房间状态不止「公开」和「没播」两种。`/api/front/m
 
 ## 订阅
 
-把 `source-index.json` 和 `stripchat-angellive-1.0.18.zip` 一起上传到 `bbnotcode/ph_js` 的 `main`
+把 `source-index.json` 和 `stripchat-angellive-1.0.19.zip` 一起上传到 `bbnotcode/ph_js` 的 `main`
 分支根目录，然后在 AngelLive 中添加订阅地址：
 
 ```text

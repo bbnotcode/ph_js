@@ -607,13 +607,26 @@
             userAgent: UA,
             headers: quality.local ? localHeaders() : playbackHeaders(),
             requestContext: { roomId: roomId, userId: username },
-            // avPlayer 是唯一稳定跑通的引擎：它用 HTTP/2、按原样请求分片地址。
-            // mePlayer 会把分片 URL 截断（约 190 字符上限），拿不到 u 参数就一路 400，
-            // 重试 8 次后整个播放线程卡死，表现就是"播一两分钟后画面卡住不动"。
-            // 同时不要声明 lowLatency：低延迟模式只留 2~3 秒缓冲，任何抖动都会直接断流。
+            // 引擎顺序 [mePlayer, avPlayer] 和宿主自己对普通 HLS 直播的默认值一致，
+            // 顺序本身就是"主路 mePlayer、起不来再自动回退 avPlayer"。
+            //
+            // 1.0.11~1.0.18 一直把这里写死成 ["avPlayer"]，因为当时 mePlayer 会把分片
+            // 地址截断在约 190 字符（u 参数从 136 砍成 109，base64 长度非法），分片一路
+            // 400、重试 8 次后播放线程卡死，表现就是"播一两分钟后画面卡住不动"。
+            //
+            // 但 1.0.15 之后分片是官方 CDN 直连地址，实测 12 个直播间 / 51 条分片最长
+            // 只有 107 字符，截断风险已经不存在。
+            //
+            // 而写死 avPlayer 的代价很大：宿主 PlaybackTuning 里 stallMonitoringEnabled
+            // "由内核决定（KSME 主路 true；KSAV/VLC false）"，也就是 KSAVPlayer 这条路上
+            // 零吞吐 watchdog 是关的、卡住后没有任何自愈机制。这正是「其他订阅源的直播
+            // 卡住后能靠按钮恢复、Stripchat 不能」的原因。mePlayer 有起播超时 / 零吞吐
+            // stall 检测和一整条恢复阶梯；真起不来时 KSPlayerLayer 会按顺序回退 avPlayer。
+            //
+            // 另外不要声明 lowLatency：低延迟模式只留 2~3 秒缓冲，任何抖动都会直接断流。
             playbackHints: {
               streamFormat: "hlsLive",
-              preferredEngines: ["avPlayer"],
+              preferredEngines: ["mePlayer", "avPlayer"],
               isLive: true,
               requiresCustomSegmentLoader: false,
               selectionBehavior: "direct"

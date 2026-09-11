@@ -210,8 +210,11 @@ async function expectFailure(label, task) {
     "playback should target the cloud worker, never a machine-local proxy");
   assert.strictEqual(proxied[0].displayName, "Stripchat 官方线路");
   assert.strictEqual(proxied[0].qualitys[0].liveCodeType, "m3u8");
-  // mePlayer 会把分片 URL 截断导致 400 卡死，只允许 avPlayer。
-  assert.strictEqual(JSON.stringify(proxied[0].qualitys[0].playbackHints.preferredEngines), '["avPlayer"]');
+  // 引擎顺序必须是 [mePlayer, avPlayer]：宿主的零吞吐 watchdog 只在 KSME 主路开启
+  // （PlaybackTuning：stallMonitoringEnabled 由内核决定，KSME 主路 true；KSAV/VLC false）。
+  // 写死 avPlayer 等于把唯一的自愈路径关掉；avPlayer 必须留作兜底。
+  assert.strictEqual(JSON.stringify(proxied[0].qualitys[0].playbackHints.preferredEngines),
+    '["mePlayer","avPlayer"]', "主路必须是 mePlayer（有 stall 自愈），avPlayer 兜底");
   assert.strictEqual(proxied[0].qualitys[0].playbackHints.latencyMode, undefined);
   assert.strictEqual(proxied[0].qualitys[0].headers.Referer, undefined);
   assert.strictEqual(proxied[0].qualitys[0].headers.Origin, undefined);
