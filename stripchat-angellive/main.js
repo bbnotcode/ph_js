@@ -25,23 +25,10 @@
   // 加起来 40 秒以上。这里给整个解析过程加一个硬上限，并给失败的流做短缓存，
   // 避免用户反复点击时每次都重跑一遍完整探测。
   var RESOLVE_DEADLINE_MS = 12000;
-  var FAIL_TTL_MS = 8000;
+  // 失败缓存只用来挡住"用户反复点同一个坏直播间"的重复探测。
+  // 不能再长：上游抖动几十秒内就会恢复，缓存太久会让重进直播间直接拿到旧错误。
+  var FAIL_TTL_MS = 4000;
   var failureCache = {};
-
-  function firstSuccess(tasks, fallback) {
-    return new Promise(function (resolve, reject) {
-      if (!tasks.length) { reject(fallback); return; }
-      var pending = tasks.length;
-      var last = fallback || null;
-      tasks.forEach(function (task) {
-        Promise.resolve().then(task).then(resolve, function (error) {
-          if (error) last = error;
-          pending -= 1;
-          if (pending === 0) reject(last || fallback);
-        });
-      });
-    });
-  }
 
   function withDeadline(promise, ms, message) {
     // 宿主若没有 setTimeout 就退化成不加超时，绝不因为兜底逻辑本身抛错。
@@ -133,7 +120,6 @@
   }
 
   function apiHeaders() { return headers("application/json, text/plain, */*"); }
-  function hlsHeaders() { return headers("application/vnd.apple.mpegurl, application/x-mpegURL, */*"); }
   function playbackHeaders() {
     return {
       "User-Agent": UA,
@@ -283,59 +269,23 @@
     return "";
   }
 
-  function joinURL(base, value) {
-    if (/^https?:\/\//i.test(value)) return value;
-    if (String(value).indexOf("//") === 0) return "https:" + value;
-    var origin = String(base).match(/^(https?:\/\/[^/]+)/i);
-    if (String(value).indexOf("/") === 0) return (origin ? origin[1] : "") + value;
-    return String(base).replace(/[^/]*(?:\?.*)?$/, "") + value;
-  }
-
-  function variants(text, base) {
-    var lines = String(text || "").split(/\r?\n/), result = [];
-    for (var i = 0; i < lines.length; i += 1) {
-      var line = lines[i].trim();
-      if (!/^#EXT-X-STREAM-INF:/i.test(line)) continue;
-      var bandwidth = Number((line.match(/BANDWIDTH=(\d+)/i) || [])[1] || 0);
-      var name = (line.match(/NAME="([^"]+)"/i) || line.match(/NAME=([^,]+)/i) || [])[1] || "";
-      var resolution = line.match(/RESOLUTION=(\d+)x(\d+)/i);
-      var height = Number(resolution && resolution[2] || 0), uri = "";
-      for (var j = i + 1; j < lines.length; j += 1) {
-        var candidate = lines[j].trim();
-        if (candidate && candidate.charAt(0) !== "#") { uri = joinURL(base, candidate); break; }
-      }
-      if (uri && !/blurred/i.test(name)) result.push({ name: name, height: height, bandwidth: bandwidth, url: uri });
-    }
-    return result;
-  }
-
-  function append(url, name, value) {
-    if (new RegExp("[?&]" + name + "=", "i").test(url)) return url;
-    return url + (url.indexOf("?") >= 0 ? "&" : "?") + name + "=" + encodeURIComponent(value);
-  }
-
-  function playableURL(url, pkey) {
-    // Keep the exact CDN host and path returned by Stripchat's signed master.
-    // Rewriting b-hls-* to another CDN breaks TLS/routing in Angel Live and can
-    // also detach the pkey from the network context that issued it.
-    var result = String(url);
-    result = append(result, "playlistType", "lowLatency");
-    result = append(result, "psch", "v2");
-    return append(result, "pkey", pkey);
-  }
-
   function localHeaders() {
     return { "Accept": "application/vnd.apple.mpegurl, application/x-mpegURL, */*" };
   }
 
   // 直接用 index.json 当健康检查：省掉一次 /health 往返，能播时只发一个请求。
-  async function proxyQualitiesAt(candidate, streamId) {
+  async function proxyQualitiesAt(candidate, streamId, bust) {
     var url = candidate.base + "/play/" + encodeURIComponent(streamId) + "/index.json";
+    if (bust) url += "?v=" + Date.now().toString(36);
     var response = await Host.http.request({
       request: { url: url, method: "GET", headers: { "Accept": "application/json" }, timeout: candidate.timeout || 5 }
     });
     if (!response || Number(response.status || 0) !== 200) {
-      throw Host.makeError("PROXY", "Mouflon 解密代理无响应 (HTTP " + String(response && response.status || 0) + ")", { url: url });
+      var status = Number(response && response.status || 0);
+      // 404 是 Worker 明确告诉我们"四个 CDN 域名全部 404"= 主播确实没播；
+      // 其余状态码（502/超时/5xx）只是这一跳的抖动，不能当成下播。
+      var code = status === 404 ? "OFFLINE" : "PROXY";
+      throw Host.makeError(code, "Mouflon 解密代理无响应 (HTTP " + String(status) + ")", { url: url });
     }
     var data = null;
     try { data = JSON.parse(String(response.bodyText || "")); }
@@ -347,7 +297,7 @@
     }).sort(function (a, b) { return b.qn - a.qn; });
   }
 
-  async function proxyQualities(streamId) {
+  async function proxyQualities(streamId, bust) {
     // 命中过的代理排在最前，其余按配置顺序兜底。
     var order = [];
     if (proxyBaseCache) order.push(proxyBaseCache);
@@ -357,11 +307,12 @@
     var last = null;
     for (var j = 0; j < order.length; j += 1) {
       try {
-        var list = await proxyQualitiesAt(order[j], streamId);
+        var list = await proxyQualitiesAt(order[j], streamId, bust);
         proxyBaseCache = order[j];
         return list;
       } catch (error) {
         last = error;
+        if (error && error.code === "OFFLINE") throw error;
         if (proxyBaseCache && order[j].base === proxyBaseCache.base) proxyBaseCache = null;
       }
     }
@@ -387,8 +338,11 @@
       });
       var status = Number(response && response.status || 0);
       if (status === 200) return "1";
-      // 代理可达但拿不到清单：4 个 CDN 域名都试过仍失败，按已下播算。
-      if (status === 404 || status === 502) return "0";
+      // 只有 404 才是"真的没播"：Worker 会先探四个 CDN 域名，全部 404 才回 404。
+      if (status === 404) return "0";
+      // 502 是这一跳的抖动（上游 403 / 超时 / 限流），不代表主播下播。
+      // 这里绝不能返回 "0"：宿主拿到 "0" 会立刻把正在播放的流掐掉，
+      // 表现就是画面播着播着突然冻住不动。
       return "3";
     } catch (_) {
       // 连代理都连不上，属于"不知道"，不能当成下播。
@@ -422,39 +376,47 @@
     }
   }
 
+  // 起播前先真的拉一次媒体清单。
+  //
+  // 代理的 index.json 只能说明"主播在播"，不代表这一刻真能拿到清单：
+  // 上游 CDN 抖动时 index.json 是 200、媒体清单却是 502（实测能连续失败几十秒）。
+  // 旧版本遇到这种情况会回退到"上游 master + pkey"的地址——那个地址看起来是好的，
+  // 但分片文件名仍是 Mouflon 加密串，播放器永远拿不到分片，于是无限转圈。
+  // 现在只把"刚刚真的拉到过清单"的画质返回给宿主。
+  async function verifyQuality(quality) {
+    try {
+      var response = await Host.http.request({
+        request: { url: quality.url, method: "GET", headers: localHeaders(), timeout: 8 }
+      });
+      if (Number(response && response.status || 0) !== 200) return null;
+      if (String(response.bodyText || "").indexOf("#EXTM3U") < 0) return null;
+      return quality;
+    } catch (_) { return null; }
+  }
+
+  async function verifyQualities(list) {
+    if (!list || !list.length) return [];
+    // 画质之间并发验证，多验几个画质只多几十毫秒，不会拖长起播。
+    var checked = await Promise.all(list.map(function (quality) { return verifyQuality(quality); }));
+    return checked.filter(function (item) { return !!item; });
+  }
+
   async function resolveQualities(streamId) {
     var last = null;
-    try { return await proxyQualities(streamId); }
-    catch (error) { last = error; }
-    try { return await discover(streamId); }
-    catch (error) { last = error; }
+    for (var attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        // 第二次重试带 cache-buster，绕开边缘上可能已经缓存的失败结果。
+        var list = await proxyQualities(streamId, attempt > 0);
+        var playable = await verifyQualities(list);
+        if (playable.length) return playable;
+        last = Host.makeError("UPSTREAM", "云端解密代理暂时拉不到媒体清单", { streamId: streamId });
+      } catch (error) {
+        last = error;
+        // 代理明确说主播没播（四个 CDN 域名全 404）时不必重试。
+        if (error && error.code === "OFFLINE") break;
+      }
+    }
     throw last || Host.makeError("UPSTREAM", "没有可用的 Stripchat 线路", { streamId: streamId });
-  }
-
-  async function discoverAt(host, streamId) {
-    var master = "https://" + host + "/hls/" + streamId + "/master/" + streamId + "_auto.m3u8";
-    var text = await get(master, hlsHeaders(), 5);
-    var match = text.match(/#EXT-X-MOUFLON:PSCH:v2:([^\r\n]+)/i);
-    if (!match) throw Host.makeError("UPSTREAM", "master 未返回 pkey", { host: host });
-    var pkey = String(match[1]).trim().split(/\s+/)[0];
-    var list = variants(text, master);
-    if (!list.length) throw Host.makeError("UPSTREAM", "master 未返回画质", { host: host });
-    return list.map(function (item) {
-      var title = item.height ? String(item.height) + "p" : item.name || "自动";
-      return { title: title, qn: item.height || 0, url: playableURL(item.url, pkey) };
-    }).sort(function (a, b) { return b.qn - a.qn; });
-  }
-
-  async function discover(streamId) {
-    var hosts = [
-      "edge-hls.doppiocdn.org",
-      "edge-hls.doppiocdn.com",
-      "edge-hls.doppiocdn.media"
-    ];
-    // 三个 CDN 域名并发探，最坏耗时从 30 秒降到一次超时。
-    return await firstSuccess(hosts.map(function (host) {
-      return function () { return discoverAt(host, streamId); };
-    }), Host.makeError("UPSTREAM", "无法获取 Stripchat HLS", { streamId: streamId }));
   }
 
   async function resolveRoom(roomId, userId) {

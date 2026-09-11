@@ -13,7 +13,12 @@ const EDGE_TLDS = ["org", "com", "net", "live"];
 const KEY_URL = "https://mouflon.chantrail.com/api/keys";
 const KEY_TTL_MS = 6 * 3600 * 1000;
 const MASTER_TTL_MS = 60 * 1000;
-const MASTER_FAIL_TTL_MS = 15 * 1000;
+// 负缓存要分开：主播确实没播可以记久一点，上游抖动只记一下下。
+// 旧版本所有失败都记 15 秒，一次抖动会让接下来 15 秒内的重试全部立刻失败，
+// 插件于是回退到"上游 master + pkey"那个播不了的地址——表现就是点进直播间一直转圈，
+// 退回首页刷新、过一会儿再进又好了。
+const OFFLINE_FAIL_TTL_MS = 15 * 1000;
+const TRANSIENT_FAIL_TTL_MS = 2 * 1000;
 const MASTER_FETCH_TIMEOUT_MS = 4500;
 const MEDIA_PLAYLIST_TTL_SECONDS = 1;
 const INDEX_TTL_SECONDS = 30;
@@ -208,7 +213,11 @@ async function loadMaster(streamId, env) {
   if (cached && Date.now() - cached.at < MASTER_TTL_MS) return cached.data;
 
   const failed = masterFailCache.get(streamId);
-  if (failed && Date.now() - failed.at < MASTER_FAIL_TTL_MS) throw new Error(failed.message);
+  if (failed && Date.now() - failed.at < (failed.offline ? OFFLINE_FAIL_TTL_MS : TRANSIENT_FAIL_TTL_MS)) {
+    const cachedError = new Error(failed.message);
+    cachedError.offline = failed.offline;
+    throw cachedError;
+  }
 
   const keys = await getKeys(env);
   // 4 个 CDN 域名并发探，最坏耗时从 36s 降到单个超时。
@@ -220,9 +229,15 @@ async function loadMaster(streamId, env) {
     return hit.data;
   }
 
+  // 只有四个 CDN 域名全部回 404，才说明这个流确实不存在（主播没播）。
+  // 超时 / 403 / 5xx 都只是这一跳的抖动，不能当成下播——插件会把"下播"
+  // 上报给宿主，宿主会立刻掐掉正在播放的流。
+  const offline = results.every((item) => /HTTP 404/.test(item.why) || /HTTP 410/.test(item.why));
   const message = `无法获取 Stripchat 直播清单 (${streamId}): ${results.map((item) => item.why).join("; ")}`;
-  masterFailCache.set(streamId, { at: Date.now(), message });
-  throw new Error(message);
+  masterFailCache.set(streamId, { at: Date.now(), message, offline });
+  const error = new Error(message);
+  error.offline = offline;
+  throw error;
 }
 
 /* ---------------------------- 播放列表改写 ---------------------------- */
@@ -668,6 +683,19 @@ export default {
 
       return text("not found", 404);
     } catch (error) {
+      // 明确的"主播没播"用 404 回，插件才能区分它和上游抖动：
+      // 404 -> 已下播；502 -> 未知（不能掐掉正在播放的流）。
+      if (error && error.offline) {
+        return new Response(JSON.stringify({ error: "model-offline", message: error.message }, null, 2), {
+          status: 404,
+          headers: {
+            "Content-Type": "application/json; charset=utf-8",
+            "Cache-Control": "no-store",
+            "X-Stripchat-Live": "0",
+            "Access-Control-Allow-Origin": "*"
+          }
+        });
+      }
       return text(`proxy error: ${error && error.message}`, 502);
     }
   }

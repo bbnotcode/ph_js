@@ -26,10 +26,13 @@ let camRequests = 0;
 let failCam = false;
 let camOffline = false;
 let proxyAvailable = false;
+let indexStatus = 200;
+let playlistFailures = 0;
 let proxyHost = "stripchat-mouflon-proxy.douyin-skip-community.workers.dev";
 const masterHosts = [];
 const proxyRequests = [];
 const modelRequests = [];
+const playlistRequests = [];
 
 const context = {
   console,
@@ -54,10 +57,11 @@ const context = {
           if (!proxyAvailable || host.toLowerCase() !== proxyHost.toLowerCase()) throw new Error("connect ECONNREFUSED " + host);
           return { status: 200, bodyText: JSON.stringify({ ok: true }) };
         }
-        if (url.includes("/play/") && url.endsWith("/index.json")) {
+        if (url.includes("/index.json")) {
           if (!proxyAvailable || new URL(url).host.toLowerCase() !== proxyHost.toLowerCase()) throw new Error("connect ECONNREFUSED " + new URL(url).host);
           proxyRequests.push(url);
           assert.strictEqual(options.request.headers.Accept, "application/json");
+          if (indexStatus !== 200) return { status: indexStatus, bodyText: JSON.stringify({ error: "model-offline" }) };
           return {
             status: 200,
             bodyText: JSON.stringify({
@@ -69,6 +73,20 @@ const context = {
               ]
             })
           };
+        }
+        if (url.includes("_auto.m3u8")) {
+          const host = new URL(url).hostname;
+          masterHosts.push(host);
+          throw new Error("插件不应再把未解密的上游 master 交给播放器: " + host);
+        }
+        if (url.endsWith(".m3u8")) {
+          playlistRequests.push(url);
+          if (playlistFailures > 0) {
+            playlistFailures -= 1;
+            return { status: 502, bodyText: "上游媒体清单不可用（已重试多个 CDN 节点）" };
+          }
+          assert.strictEqual(options.request.headers.Accept, "application/vnd.apple.mpegurl, application/x-mpegURL, */*");
+          return { status: 200, bodyText: "#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:1\nhttps://media-hls.doppiocdn.org/b-hls-16/123456/123456_1_abc.mp4\n" };
         }
         if (url.includes("/api/front/v2/models/username/")) {
           camRequests += 1;
@@ -83,14 +101,6 @@ const context = {
           modelRequests.push(url);
           return { status: 200, bodyText: JSON.stringify({ models: [model] }) };
         }
-        if (url.includes("_auto.m3u8")) {
-          const host = new URL(url).hostname;
-          masterHosts.push(host);
-          if (host === "edge-hls.doppiocdn.org" || host === "edge-hls.doppiocdn.com") {
-            throw new Error("simulated NSURLError -1004");
-          }
-          return { status: 200, bodyText: master.replaceAll("doppiocdn.org", "doppiocdn.media") };
-        }
         throw new Error("Unexpected URL: " + url);
       }
     }
@@ -99,6 +109,12 @@ const context = {
 context.globalThis = context;
 vm.createContext(context);
 vm.runInContext(fs.readFileSync(__dirname + "/main.js", "utf8"), context);
+
+async function expectFailure(label, task) {
+  let failed = false;
+  try { await task(); } catch (_) { failed = true; }
+  assert.ok(failed, label + "：必须抛错而不是返回结果");
+}
 
 (async () => {
   const plugin = context.LiveParsePlugin;
@@ -132,50 +148,63 @@ vm.runInContext(fs.readFileSync(__dirname + "/main.js", "utf8"), context);
   const detail = await plugin.getRoomDetail({ roomId: "123456", userId: "demo_user" });
   assert.strictEqual(detail.roomId, "123456");
 
-  // 代理不可用时回退到直连官方 CDN 的旧行为
+  // 云端解密代理不可用时必须直接报错。
+  // 上游 master 里的分片名是 Mouflon 加密串，交给播放器只会无限转圈，
+  // 所以绝不能再"看起来成功、其实播不了"地回退过去。
   failCam = true;
-  const camRequestsBeforePlayback = camRequests;
-  const playback = await plugin.getPlayback({ roomId: "123456", userId: "demo_user" });
-  assert.strictEqual(camRequests, camRequestsBeforePlayback, "playback should not require the cam endpoint when roomId works");
-  assert.strictEqual(playback[0].qualitys.length, 2);
-  assert.deepStrictEqual(masterHosts, [
-    "edge-hls.doppiocdn.org",
-    "edge-hls.doppiocdn.com",
-    "edge-hls.doppiocdn.media"
-  ]);
-  assert.strictEqual(playback[0].qualitys[0].liveCodeType, "m3u8");
-  assert.ok(playback[0].qualitys[0].url.includes("media-hls.doppiocdn.media/b-hls-21/"));
-  assert.ok(!playback[0].qualitys[0].url.includes("growcdnssedge.com"));
-  assert.ok(playback[0].qualitys[0].url.includes("pkey=test-pkey"));
-  assert.strictEqual(playback[0].displayName, "Stripchat 官方线路");
-  // mePlayer 会把分片 URL 截断导致 400 卡死，只允许 avPlayer。
-  assert.strictEqual(JSON.stringify(playback[0].qualitys[0].playbackHints.preferredEngines), '["avPlayer"]');
-  assert.strictEqual(playback[0].qualitys[0].playbackHints.latencyMode, undefined);
-  assert.strictEqual(playback[0].qualitys[0].headers.Origin, undefined);
-  assert.strictEqual(playback[0].qualitys[0].headers.Referer, undefined);
+  // 用独立的 roomId：失败结论会进 8 秒失败缓存，换个 id 才能测到真实路径。
+  await expectFailure("云端代理不可用", () => plugin.getPlayback({ roomId: "111111", userId: "demo_user" }));
+  assert.deepStrictEqual(masterHosts, [], "任何情况下都不应请求未解密的上游 master");
 
   // 所有设备统一走云端 Mouflon 解密代理
   proxyAvailable = true;
+  proxyRequests.length = 0;
+  playlistRequests.length = 0;
   proxyRequests.length = 0;
   const masterHostsBeforeProxy = masterHosts.length;
   const proxied = await plugin.getPlayback({ roomId: "123456", userId: "demo_user" });
   assert.strictEqual(proxyRequests.length, 1);
   assert.strictEqual(masterHosts.length, masterHostsBeforeProxy, "proxy path must not touch upstream master");
+  // 起播前必须真的拉过一次媒体清单验证，两个画质各一次。
+  assert.strictEqual(playlistRequests.length, 2, "每个画质都要先验证清单可拉取");
   assert.strictEqual(proxied[0].qualitys.length, 2);
   assert.strictEqual(proxied[0].qualitys[0].qn, 1080);
   assert.ok(proxied[0].qualitys[0].url.startsWith("http://" + proxyHost + "/play/123456/"),
     "playback should target the cloud worker, never a machine-local proxy");
+  assert.strictEqual(proxied[0].displayName, "Stripchat 官方线路");
+  assert.strictEqual(proxied[0].qualitys[0].liveCodeType, "m3u8");
+  // mePlayer 会把分片 URL 截断导致 400 卡死，只允许 avPlayer。
+  assert.strictEqual(JSON.stringify(proxied[0].qualitys[0].playbackHints.preferredEngines), '["avPlayer"]');
+  assert.strictEqual(proxied[0].qualitys[0].playbackHints.latencyMode, undefined);
   assert.strictEqual(proxied[0].qualitys[0].headers.Referer, undefined);
   assert.strictEqual(proxied[0].qualitys[0].headers.Origin, undefined);
   assert.strictEqual(proxied[0].qualitys[0].playbackHints.requiresCustomSegmentLoader, false);
 
-  // 云端代理不可用时回退到直连上游，而不是再去找 Mac 本地进程
-  proxyAvailable = false;
+  // 上游抖动导致媒体清单 502 时：丢掉的画质不能被返回，
+  // 但只要有画质验证通过就照常播放，不能把整次起播拖垮。
+  playlistRequests.length = 0;
+  playlistFailures = 1;
+  const partial = await plugin.getPlayback({ roomId: "123456", userId: "demo_user" });
+  assert.strictEqual(partial[0].qualitys.length, 1, "只返回验证通过的画质");
+
+  // 全部画质都拉不到清单时：重试一次并带上 cache-buster 绕开边缘缓存。
   proxyRequests.length = 0;
-  const directAgain = await plugin.getPlayback({ roomId: "123456", userId: "demo_user" });
-  assert.strictEqual(proxyRequests.length, 0, "must not probe any machine-local proxy");
-  assert.ok(!directAgain[0].qualitys[0].url.includes("127.0.0.1"));
-  assert.ok(!directAgain[0].qualitys[0].url.includes(".local"));
+  playlistRequests.length = 0;
+  playlistFailures = 99;
+  await expectFailure("全部画质都拉不到清单", () => plugin.getPlayback({ roomId: "222222", userId: "demo_user" }));
+  assert.strictEqual(proxyRequests.length, 2, "失败后必须重试一次代理");
+  assert.ok(/[?&]v=/.test(proxyRequests[1]), "重试必须带 cache-buster，绕开边缘缓存的失败结果");
+  playlistFailures = 0;
+
+  // 主播确实没播（Worker 探遍四个 CDN 域名都是 404）时才允许报"已下播"。
+  indexStatus = 404;
+  const offlineState = await plugin.getLiveState({ roomId: "123456", userId: "demo_user" });
+  assert.strictEqual(offlineState.liveState, "0", "404 才是真的没播");
+  // 502 只是这一跳抖动，绝不能报"已下播"，否则宿主会把正在播放的流掐掉。
+  indexStatus = 502;
+  const flakyState = await plugin.getLiveState({ roomId: "123456", userId: "demo_user" });
+  assert.strictEqual(flakyState.liveState, "3", "502 是抖动，必须报未知 3");
+  indexStatus = 200;
 
   // 直播状态：cam 接口被 Stripchat 反爬拦截（实测稳定返回 HTTP 418）时，
   // 插件绝不能报 "0"（已下播），否则宿主会把正在播放的流掐掉，

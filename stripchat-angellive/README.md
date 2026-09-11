@@ -7,7 +7,7 @@ AngelLive API v1 插件，仅枚举和播放 Stripchat `public` 状态的直播�
 - `manifest.json`：AngelLive 插件清单。
 - `main.js`：分类、房间、搜索、详情、状态和 HLS 播放实现。
 - `test.js`：`node test.js` 运行契约测试（含代理路径与直连回退路径）。
-- `stripchat-angellive-1.0.15.zip`：可安装插件包，包含 AngelLive 列表和首页平台卡片图标。
+- `stripchat-angellive-1.0.16.zip`：可安装插件包，包含 AngelLive 列表和首页平台卡片图标。
 - `worker/`：Cloudflare Worker 版解密代理源码。
 - `source-index.json`：AngelLive 订阅源索引。
 
@@ -110,9 +110,27 @@ streamId / 序号 / 时间戳都是明文。解密后得到的就是可以直接
 
 想一键回退成旧的中转模式：给 Worker 设置 `SEGMENT_MODE=proxy` 再部署即可。
 
+## 「点进去就卡」的两个真实成因（1.0.16 修复）
+
+**一、回退到了播不了的地址。** 早先云端代理失败时会回退到「上游 master + pkey」。
+那个地址看起来是好的，但分片文件名仍是 Mouflon 加密串，播放器永远拿不到分片，
+于是无限转圈——比直接报错更糟。现在只剩云端解密代理一条路：起播前先真的拉一次
+媒体清单验证，只把确认能播的画质返回给宿主；全部画质都拉不到就给宿主一个明确的
+错误，让用户重试，而不是交出死地址。
+
+**二、上游抖动被当成了「主播下播」。** Worker 原来对四个 CDN 域名轮询失败一律记
+15 秒负缓存、一律回 502。于是一次抖动会污染接下来 15 秒的全部重试，而插件又把
+502 当成「已下播」上报，宿主会立刻掐掉正在播放的流。现在：
+
+- 四个 CDN 域名**全部 404** 才算真没播，Worker 回 **404**（负缓存 15 秒）；
+- 超时 / 403 / 5xx 只是这一跳抖动，回 **502**（负缓存只有 2 秒）；
+- 插件的直播状态探测只在 **404** 时报「已下播」，**502 一律报「未知」**。
+
+这正好解释了那个现象：卡住的直播间退回首页刷新一下、过十几秒再进就恢复了。
+
 ## 订阅
 
-把 `source-index.json` 和 `stripchat-angellive-1.0.15.zip` 一起上传到 `bbnotcode/ph_js` 的 `main`
+把 `source-index.json` 和 `stripchat-angellive-1.0.16.zip` 一起上传到 `bbnotcode/ph_js` 的 `main`
 分支根目录，然后在 AngelLive 中添加订阅地址：
 
 ```text
