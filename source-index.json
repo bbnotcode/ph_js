@@ -1,11 +1,13 @@
 {
   "apiVersion": 1,
-  "generatedAt": "2026-09-11T07:00:00Z",
+  "generatedAt": "2026-09-11T07:20:00Z",
   "plugins": [
     {
       "pluginId": "stripchat",
-      "version": "1.0.5",
+      "version": "1.0.6",
       "changelog": [
+        "保留 Stripchat 官方签名媒体地址，不再改写到不兼容的 Grow CDN",
+        "精简原生播放请求头并优先使用 AVPlayer，修复连接闪断后误报下播",
         "增加 Stripchat 官方 .media CDN 回退，修复 NSURLError -1004",
         "播放优先使用列表 roomId 直连 HLS，避免 cam 接口断网导致播放失败",
         "修复新版 AngelLive 安全校验下的 NETWORK invalid URL",
@@ -20,9 +22,9 @@
       "platformDescription": "Stripchat 公开直播源，支持分类、搜索、详情和多画质 HLS 播放。",
       "icon": "https://assets.chapturist.com/assets/icons/favicon-512x512_stripchat.global.png?v=2609fcdf",
       "zipURLs": [
-        "https://raw.githubusercontent.com/bbnotcode/ph_js/main/stripchat-angellive-1.0.5.zip"
+        "https://raw.githubusercontent.com/bbnotcode/ph_js/main/stripchat-angellive-1.0.6.zip"
       ],
-      "sha256": "ecee1e034b98154f8f0e6076185d0abffa1020bd7839289f4366114e4cb9cc4b",
+      "sha256": "0b12ee02b970e6f04ac3a997a643e996fc97dfc88fc7ad06a235ae5975370c85",
       "auth": {
         "required": false,
         "credentialKinds": [],
