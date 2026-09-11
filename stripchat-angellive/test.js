@@ -25,6 +25,8 @@ const master = [
 let camRequests = 0;
 let failCam = false;
 let camOffline = false;
+let extraModels = [];
+let camModelFor = {};
 let proxyAvailable = false;
 let indexStatus = 200;
 let playlistFailures = 0;
@@ -91,7 +93,9 @@ const context = {
         if (url.includes("/api/front/v2/models/username/")) {
           camRequests += 1;
           if (failCam) throw new Error("cam endpoint unavailable");
-          const camModel = camOffline ? Object.assign({}, model, { status: "offline", isLive: false }) : model;
+          const camName = decodeURIComponent(url.split("/api/front/v2/models/username/")[1].split("/")[0]);
+          let camModel = camModelFor[camName] || model;
+          if (camOffline) camModel = Object.assign({}, model, { status: "offline", isLive: false });
           return { status: 200, bodyText: JSON.stringify({ user: { user: camModel }, cam: { streamName: "123456" } }) };
         }
         if (url.includes("/api/front/v2/models?")) {
@@ -99,7 +103,7 @@ const context = {
         }
         if (url.includes("/api/front/models?")) {
           modelRequests.push(url);
-          return { status: 200, bodyText: JSON.stringify({ models: [model] }) };
+          return { status: 200, bodyText: JSON.stringify({ models: [model].concat(extraModels) }) };
         }
         throw new Error("Unexpected URL: " + url);
       }
@@ -260,7 +264,75 @@ async function expectFailure(label, task) {
     "cam 说下播但代理能拉到清单时，以代理为准");
   camOffline = false;
 
+  // ---- 付费场次（门票场 / 组秀 / 私密秀）----
+  // 这些房间官网列表里确实在播，只是没有公开分片。
+  // 以前直接把它们从列表里过滤掉，表现是"明明在播、列表里却找不到"，
+  // 或者从收藏点进去被当成"已下播"。
   failCam = false;
+  proxyAvailable = true;
+  indexStatus = 200;
+  const ticketModel = {
+    id: "900001",
+    username: "ticket_user",
+    status: "groupShow",
+    groupShowType: "ticket",
+    isLive: true,
+    isOnline: true,
+    snapshotUrl: "//img.example/ticket.jpg",
+    viewersCount: 7
+  };
+  const offlineModel = {
+    id: "900002",
+    username: "gone_user",
+    status: "offline",
+    isLive: false,
+    isOnline: false,
+    snapshotUrl: "//img.example/gone.jpg"
+  };
+  extraModels = [ticketModel, offlineModel];
+  camModelFor = { ticket_user: ticketModel };
+  const mixed = await plugin.getRooms({ id: "girls", page: 1 });
+  assert.strictEqual(mixed.length, 2, "付费场次要保留在列表里，只过滤真下播的");
+  assert.strictEqual(mixed.filter((room) => room.userId === "gone_user").length, 0,
+    "isLive=false 的房间必须过滤掉");
+  const ticketRoom = mixed.filter((room) => room.userId === "ticket_user")[0];
+  assert.ok(ticketRoom, "门票场必须出现在列表里");
+  assert.ok(ticketRoom.roomTitle.indexOf("门票场") >= 0, "标题必须标出门票场：" + ticketRoom.roomTitle);
+  assert.strictEqual(ticketRoom.liveState, "1", "门票场也是在播，报 1 才能点进去");
+  assert.strictEqual(ticketRoom.liveWatchedCount, "门票场", "状态标签要顶掉观看人数，用户一眼能看到");
+
+  // 门票场没有公开分片，代理必然拿不到清单（404）。
+  // 这时绝不能把代理错误原样抛给用户，必须说明是付费场次。
+  indexStatus = 404;
+  await expectFailure("门票场必须给出人话提示", async () => {
+    try {
+      await plugin.getPlayback({ roomId: "900001", userId: "ticket_user" });
+    } catch (error) {
+      assert.strictEqual(error.code, "NOT_LIVE", "应是 NOT_LIVE，实际 " + error.code);
+      assert.ok(error.message.indexOf("门票") >= 0, "提示必须说明是门票场：" + error.message);
+      throw error;
+    }
+  });
+  // 直播状态也必须报在播，否则宿主的收藏列表会把正在播的主播标成已下播。
+  const ticketState = await plugin.getLiveState({ roomId: "900001", userId: "ticket_user" });
+  assert.strictEqual(ticketState.liveState, "1", "门票场的 liveState 必须是 1，不能是 0");
+  indexStatus = 200;
+  extraModels = [];
+  camModelFor = {};
+
+  // ---- 复制直播间链接 / 在浏览器打开 ----
+  // stripchat.com 在部分网络下不可达（本机实测解析到 127.0.0.1，浏览器直接报"无法访问此网站"），
+  // zh.stripchat.global 是同一个站点的中文域名，实测正常返回主播页。
+  const manifest = JSON.parse(fs.readFileSync(__dirname + "/manifest.json", "utf8"));
+  const template = manifest.hostBehavior.externalRoomURLTemplate;
+  assert.ok(template.indexOf("zh.stripchat.global") >= 0,
+    "复制链接必须用 zh.stripchat.global（stripchat.com 在部分网络下打不开）：" + template);
+  assert.ok(template.indexOf("{userId}") >= 0, "模板必须带 {userId} 占位符：" + template);
+  assert.strictEqual(template.replace("{userId}", "kem_2000"), "https://zh.stripchat.global/kem_2000");
+  assert.strictEqual(JSON.stringify(manifest.shareResolve.hosts),
+    JSON.stringify(["stripchat.com", "zh.stripchat.global"]),
+    "分享口令要同时认两个域名的链接");
+
   const share = await plugin.resolveShare({ shareCode: "https://stripchat.com/demo_user" });
   assert.strictEqual(share.userId, "demo_user");
   console.log("AngelLive Stripchat contract tests passed");

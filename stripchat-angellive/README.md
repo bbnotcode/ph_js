@@ -7,7 +7,7 @@ AngelLive API v1 插件，仅枚举和播放 Stripchat `public` 状态的直播�
 - `manifest.json`：AngelLive 插件清单。
 - `main.js`：分类、房间、搜索、详情、状态和 HLS 播放实现。
 - `test.js`：`node test.js` 运行契约测试（含代理路径与直连回退路径）。
-- `stripchat-angellive-1.0.17.zip`：可安装插件包，包含 AngelLive 列表和首页平台卡片图标。
+- `stripchat-angellive-1.0.18.zip`：可安装插件包，包含 AngelLive 列表和首页平台卡片图标。
 - `worker/`：Cloudflare Worker 版解密代理源码。
 - `source-index.json`：AngelLive 订阅源索引。
 
@@ -152,9 +152,52 @@ AngelLive 对图标的渲染方式是固定的，插件只能适配：
 
 这正好解释了那个现象：卡住的直播间退回首页刷新一下、过十几秒再进就恢复了。
 
+## 付费 / 私密 / 组秀场次（1.0.18 修正）
+
+Stripchat 的房间状态不止「公开」和「没播」两种。`/api/front/models` 里会返回
+`status: "groupShow"`（`groupShowType: "ticket"` 的门票场）、`private`、`p2p` 等。
+这些房间**确实在播**，只是没有公开分片，AngelLive 播不了。
+
+旧版用一句 `publicLive` 把它们从列表里整个过滤掉，表现是：
+
+- 官网明明显示在播，插件列表里却找不到这个主播；
+- 收藏夹里的主播一直是灰的，看着像已经下播。
+
+现在改成三档处理：
+
+| 房间状态 | 列表里 | `roomTitle` 后缀 | `liveState` | 点进播放 |
+| --- | --- | --- | --- | --- |
+| 公开 | 显示 | 无 | `1` | 正常播放 |
+| 门票场 / 组秀 / 私密 / 其他付费 | **显示** | `· 门票场` 等 | `1` | 抛 `NOT_LIVE` + 人话提示 |
+| 真下播（`isLive: false`） | 过滤 | — | `0` | — |
+
+两个关键点：
+
+- **`liveState` 必须报 `1`**。报 `0` 会被宿主当成下播，主播从公开切到私密的那一刻
+  正在播放的流会被直接掐掉；
+- **提示要走 `NOT_LIVE` 而不是原样抛代理错误**。付费房间没有公开分片，解析 `roomId`
+  必然失败，旧版会把「Mouflon 解密代理无响应」丢给用户，看不出发生了什么。
+  现在按状态提示「该主播当前是门票场，需要先购票才能观看；AngelLive 播放不了付费场次」。
+
+## 复制直播间链接 / 在浏览器打开（1.0.18 修复）
+
+这两个按钮的地址由 `manifest.json` 的 `hostBehavior.externalRoomURLTemplate` 生成，
+宿主只做一次 `{userId}` 字符串替换。模板一直是 `https://stripchat.com/{userId}`，
+但 **`stripchat.com` 在部分网络下不可达**（本机实测解析到 `127.0.0.1`，
+浏览器直接报「无法访问此网站」），而同一站点的中文域名 `zh.stripchat.global` 正常。
+
+现在模板改成：
+
+```json
+"externalRoomURLTemplate": "https://zh.stripchat.global/{userId}"
+```
+
+`shareResolve.hosts` 仍然保留 `stripchat.com` 和 `zh.stripchat.global` 两个域名，
+粘贴任何一种链接都能被 `resolveShare` 认出来。
+
 ## 订阅
 
-把 `source-index.json` 和 `stripchat-angellive-1.0.17.zip` 一起上传到 `bbnotcode/ph_js` 的 `main`
+把 `source-index.json` 和 `stripchat-angellive-1.0.18.zip` 一起上传到 `bbnotcode/ph_js` 的 `main`
 分支根目录，然后在 AngelLive 中添加订阅地址：
 
 ```text
@@ -182,7 +225,8 @@ jsDelivr 的分支缓存。索引边缘只缓存 60 秒，发新版大约 1 分�
 > 或改用带 commit 的固定地址（永久生效，不随 main 更新）：
 > `https://cdn.jsdelivr.net/gh/bbnotcode/ph_js@<commit>/source-index.json`
 
-> 不支持私房、群组秀或付费视频。插件不会绕过 Stripchat 的访问控制或付费墙。
+> 门票场 / 组秀 / 私房 / 付费视频都不支持播放。插件不会绕过 Stripchat 的访问控制或付费墙，
+> 但会把这类房间照常显示出来并标注状态，点进去给一句人话提示（见下一节）。
 
 > 注意：这个版本依赖 `PROXY_HOSTS` 里的解密代理。云端 Worker 地址是作者自有的，
 > 别人装了会共用同一个 Worker 并消耗作者账号的额度。要长期分享，建议让使用者

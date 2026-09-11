@@ -176,9 +176,41 @@
     return result;
   }
 
-  function publicLive(model) {
-    var status = String(model && model.status || "").toLowerCase();
-    return (!status || status === "public") && model.isLive !== false && model.isOnline !== false;
+  // Stripchat 的房间状态不止「公开 / 没播」两种。实测 /api/front/models 会返回
+  // status=groupShow（groupShowType=ticket 的门票场）这类房间，它们确实在播，
+  // 但公开分片是不存在的。以前 publicLive 把它们直接过滤掉，表现就是
+  // 「明明在播，列表里却找不到」，或者从收藏点进去被判成「已下播」。
+  //
+  // 现在把「在线但要付费」单独识别出来：列表里保留并标注，点进去给一句人话提示。
+  var ROOM_KIND_LABELS = {
+    ticket: "门票场",
+    group: "组秀中",
+    private: "私密中",
+    paid: "收费中"
+  };
+
+  function roomKind(model) {
+    if (!model || model.isLive === false || model.isOnline === false) return "offline";
+    var status = String(model.status || "").trim().toLowerCase();
+    if (!status || status === "public") return "public";
+    if (status === "groupshow" || status === "group") {
+      return String(model.groupShowType || "").trim().toLowerCase() === "ticket" ? "ticket" : "group";
+    }
+    if (status === "private" || status === "p2p" || status === "virtualprivate") return "private";
+    // 兜底：在线、但状态不是 public，就按「要付费」处理。
+    // 绝不静默当成下播——那会让正在播的房间看起来像没人。
+    return "paid";
+  }
+
+  function roomKindLabel(kind) {
+    return ROOM_KIND_LABELS[kind] || "";
+  }
+
+  function paidReason(kind) {
+    if (kind === "ticket") return "该主播当前是门票场，需要先购票才能观看；AngelLive 播放不了付费场次";
+    if (kind === "group") return "该主播当前在组秀中，AngelLive 播放不了组秀场次";
+    if (kind === "private") return "该主播当前在私密秀中，AngelLive 播放不了私密场次";
+    return "该主播当前是付费场次，AngelLive 播放不了需要付费的内容";
   }
 
   // /api/front/v2/* 返回的是相对路径（/previews/... 、/avatars/...），
@@ -211,18 +243,24 @@
     model = normalizeModel(model || {});
     var username = String(model.username || model.name || model.nickname || "未命名主播");
     var modelId = String(model.id !== undefined ? model.id : model.modelId || "");
+    var kind = roomKind(model);
+    var label = roomKindLabel(kind);
     var cover = upgradeImage(model.snapshotUrl || model.previewUrlThumbBig || model.previewUrlThumbSmall || model.avatarUrl || model.previewUrl || model.image, detail);
     var avatar = absoluteImage(model.avatarUrl || model.previewUrlThumbSmall || cover);
     var viewers = model.viewersCount !== undefined ? model.viewersCount : model.viewers;
+    var countText = viewers === undefined || viewers === null ? "" : String(viewers);
     return {
       userName: username,
-      roomTitle: username + " 的直播",
+      // 直播间链接、标题栏都会展示 roomTitle，把付费状态标在这里最直接。
+      roomTitle: label ? username + " 的直播 · " + label : username + " 的直播",
       roomCover: cover,
       userHeadImg: avatar,
-      liveState: publicLive(model) ? "1" : "0",
+      // 在线但要付费的房间也是「在直播」，报 "1" 才能让宿主允许点进去，
+      // 进去后由 getPlayback 给出明确提示；报 "0" 会被当成下播直接挡掉。
+      liveState: kind === "offline" ? "0" : "1",
       userId: username,
       roomId: modelId || username,
-      liveWatchedCount: viewers === undefined || viewers === null ? "" : String(viewers)
+      liveWatchedCount: label || countText
     };
   }
 
@@ -249,7 +287,8 @@
     parts.push("uniq=" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6));
     var root = payload(await currentAPI("/api/front/models?" + parts.join("&"), 20));
     var models = root.models || root.items || root.users || root.results || [];
-    return models.map(normalizeModel).filter(publicLive);
+    // 只过滤真没播的；付费 / 私密 / 组秀 也保留在列表里，并标注出状态。
+    return models.map(normalizeModel).filter(function (item) { return roomKind(item) !== "offline"; });
   }
 
   async function fetchModels(tag, page) {
@@ -503,7 +542,11 @@
       try {
         var model = await withDeadline(resolveRoom(roomId, username), LIVE_STATE_DEADLINE_MS,
           "直播状态查询超过 " + Math.round(LIVE_STATE_DEADLINE_MS / 1000) + " 秒");
-        if (publicLive(model)) return { liveState: "1" };
+        var kind = roomKind(model);
+        // 公开直播直接确认；付费 / 私密场次也是在播，只是要付费。
+        // 这里绝不能回退成 "0"：主播从公开切到私密时，
+        // 宿主会把 "0" 当成下播，把正在播的流直接掉。
+        if (kind !== "offline") return { liveState: "1" };
       } catch (_) { /* cam 被反爬拦截或超时，下面用代理判断，绝不因此报"已下播" */ }
       // cam 明确说不在播、或 cam 根本问不到时，都以云端代理探测到的真实清单为准。
       return { liveState: await probeLiveViaProxy(roomId || username) };
@@ -523,15 +566,30 @@
         catch (error) { directError = error; }
       }
       if (!qualitys && username) {
-        try {
-          var model = await fetchCam(username);
-          if (!publicLive(model)) throw Host.makeError("NOT_LIVE", "主播当前不是公开直播", { username: username });
-          var currentStreamId = streamName(model);
-          if (!currentStreamId) throw Host.makeError("NOT_LIVE", "主播当前没有可用直播流", { username: username });
-          qualitys = await qualitiesFor(currentStreamId);
-        } catch (fallbackError) {
-          throw directError || fallbackError;
+        var model = null;
+        var camError = null;
+        try { model = await fetchCam(username); }
+        catch (error) { camError = error; }
+        if (!model) {
+          // 问不到主播状态（cam 被反爬拦截），
+          // 退回到直接解析的错误。
+          throw directError || camError || Host.makeError("NOT_LIVE", "拿不到主播当前状态", { username: username });
         }
+        // 付费 / 私密场次必须在 directError 之前报出来：
+        // 这类房间没有公开分片，直接解析 roomId 失败是必然的，
+        // 如果先报 directError，用户看到的只会是一句看不懂的代理错误。
+        var kind = roomKind(model);
+        if (kind !== "public") {
+          throw Host.makeError("NOT_LIVE", paidReason(kind), {
+            username: username,
+            status: String(model.status || ""),
+            groupShowType: String(model.groupShowType || "")
+          });
+        }
+        var currentStreamId = streamName(model);
+        if (!currentStreamId) throw Host.makeError("NOT_LIVE", "主播当前没有可用直播流", { username: username });
+        try { qualitys = await qualitiesFor(currentStreamId); }
+        catch (streamError) { throw directError || streamError; }
       }
       if (!qualitys) throw directError || Host.makeError("NOT_LIVE", "没有可用直播流", { roomId: roomId });
       return [{
