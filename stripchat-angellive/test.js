@@ -25,7 +25,7 @@ const master = [
 let camRequests = 0;
 let failCam = false;
 let proxyAvailable = false;
-let proxyHost = "127.0.0.1:8787";
+let proxyHost = "stripchat-mouflon-proxy.douyin-skip-community.workers.dev";
 const masterHosts = [];
 const proxyRequests = [];
 
@@ -131,7 +131,7 @@ vm.runInContext(fs.readFileSync(__dirname + "/main.js", "utf8"), context);
   assert.strictEqual(playback[0].qualitys[0].headers.Origin, undefined);
   assert.strictEqual(playback[0].qualitys[0].headers.Referer, undefined);
 
-  // 代理可用时优先走本地 Mouflon 解密代理
+  // 所有设备统一走云端 Mouflon 解密代理
   proxyAvailable = true;
   proxyRequests.length = 0;
   const masterHostsBeforeProxy = masterHosts.length;
@@ -140,18 +140,19 @@ vm.runInContext(fs.readFileSync(__dirname + "/main.js", "utf8"), context);
   assert.strictEqual(masterHosts.length, masterHostsBeforeProxy, "proxy path must not touch upstream master");
   assert.strictEqual(proxied[0].qualitys.length, 2);
   assert.strictEqual(proxied[0].qualitys[0].qn, 1080);
-  assert.ok(proxied[0].qualitys[0].url.startsWith("http://127.0.0.1:8787/play/123456/"));
+  assert.ok(proxied[0].qualitys[0].url.startsWith("http://" + proxyHost + "/play/123456/"),
+    "playback should target the cloud worker, never a machine-local proxy");
   assert.strictEqual(proxied[0].qualitys[0].headers.Referer, undefined);
   assert.strictEqual(proxied[0].qualitys[0].headers.Origin, undefined);
   assert.strictEqual(proxied[0].qualitys[0].playbackHints.requiresCustomSegmentLoader, false);
 
-  // 回环不可用时改走 Mac 的 Bonjour 名（iPad 等局域网设备就是这条路径）
-  proxyHost = "huangzls-MacBook-Air.local:8787";
+  // 云端代理不可用时回退到直连上游，而不是再去找 Mac 本地进程
+  proxyAvailable = false;
   proxyRequests.length = 0;
-  const lan = await plugin.getPlayback({ roomId: "123456", userId: "demo_user" });
-  assert.strictEqual(proxyRequests.length, 1);
-  assert.ok(lan[0].qualitys[0].url.startsWith("http://huangzls-MacBook-Air.local:8787/play/123456/"),
-    "LAN playback should target the Bonjour host the client actually reached");
+  const directAgain = await plugin.getPlayback({ roomId: "123456", userId: "demo_user" });
+  assert.strictEqual(proxyRequests.length, 0, "must not probe any machine-local proxy");
+  assert.ok(!directAgain[0].qualitys[0].url.includes("127.0.0.1"));
+  assert.ok(!directAgain[0].qualitys[0].url.includes(".local"));
 
   failCam = false;
   const share = await plugin.resolveShare({ shareCode: "https://stripchat.com/demo_user" });

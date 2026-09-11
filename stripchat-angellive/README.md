@@ -7,7 +7,7 @@ AngelLive API v1 插件，仅枚举和播放 Stripchat `public` 状态的直播�
 - `manifest.json`：AngelLive 插件清单。
 - `main.js`：分类、房间、搜索、详情、状态和 HLS 播放实现。
 - `test.js`：`node test.js` 运行契约测试（含代理路径与直连回退路径）。
-- `stripchat-angellive-1.0.12.zip`：可安装插件包，包含 AngelLive 列表和首页平台卡片图标。
+- `stripchat-angellive-1.0.13.zip`：可安装插件包，包含 AngelLive 列表和首页平台卡片图标。
 - `worker/`：Cloudflare Worker 版解密代理源码。
 - `source-index.json`：AngelLive 订阅源索引。
 
@@ -63,26 +63,20 @@ Stripchat 的 HLS 现在启用了 **Mouflon v2** 保护，宿主播放器无法�
 
 ```js
 var PROXY_HOSTS = [
-  { base: "http://127.0.0.1:8787", timeout: 3 },                                        // Mac 本地进程，不耗云端额度
-  { base: "https://stripchat-mouflon-proxy.douyin-skip-community.workers.dev", timeout: 8 }, // 云端常驻，任意设备可用
-  { base: "http://huangzls-MacBook-Air.local:8787", timeout: 5 }                        // 局域网兜底
+  { base: "https://stripchat-mouflon-proxy.douyin-skip-community.workers.dev", timeout: 10 }
 ];
 ```
 
-- **iPad / iPhone / 其他设备**：直接命中云端 Worker，不需要 Mac 开机。
-- **Mac 上**：优先用本地进程（`~/stripchat-mouflon-proxy/`），省云端额度。
-- 全部不可用时回退到旧的直连逻辑（此时通常播不出来）。
+**所有设备统一只走云端 Worker**：手机、平板、Mac 行为完全一致，出问题只需要看一处日志，
+也不依赖任何一台自己的机器开着机。Mac 上那个本地进程（`~/stripchat-mouflon-proxy/`，
+`127.0.0.1:8787`）已经不再被引用——留着当手动备用即可，想临时切回去就把
+`{ base: "http://127.0.0.1:8787", timeout: 2 }` 加回数组最前面。
 
-云端 Worker 的源码在 `worker/`，改动后 `npx wrangler deploy` 重新发布即可。
-
-```bash
-launchctl print gui/$(id -u)/com.local.stripchat-mouflon-proxy | grep -E "state|pid"   # 本地代理
-curl -s https://stripchat-mouflon-proxy.douyin-skip-community.workers.dev/health        # 云端代理
-```
+云端 Worker 不可用时会回退到旧的直连逻辑（此时通常播不出来），不会再去找机器本地进程。
 
 ## 订阅
 
-把 `source-index.json` 和 `stripchat-angellive-1.0.12.zip` 一起上传到 `bbnotcode/ph_js` 的 `main`
+把 `source-index.json` 和 `stripchat-angellive-1.0.13.zip` 一起上传到 `bbnotcode/ph_js` 的 `main`
 分支根目录，然后在 AngelLive 中添加订阅地址：
 
 ```text

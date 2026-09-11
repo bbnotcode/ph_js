@@ -528,11 +528,16 @@ async function handleSegment(url, env, ctx) {
 
 async function fetchSubscriptionFile(path) {
   const errors = [];
+  // 回源必须带 cache-buster：raw.githubusercontent 的 Fastly 缓存对同一个 URL
+  // 会缓存十几分钟，发新版后设备迟迟看不到。按索引 TTL 分桶，既保证一分钟内必刷，
+  // 又不会每个请求都打穿到 GitHub。
+  const bucket = Math.floor(Date.now() / (SUB_INDEX_TTL_SECONDS * 1000));
   for (const base of [SUB_RAW, SUB_MIRROR]) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 15000);
     try {
-      const res = await fetch(base + path, {
+      const target = base === SUB_RAW ? `${base}${path}?cb=${bucket}` : `${base}${path}`;
+      const res = await fetch(target, {
         headers: { "User-Agent": UA, "Accept": "*/*" },
         signal: controller.signal
       });

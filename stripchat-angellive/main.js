@@ -7,17 +7,16 @@
   var PAGE_SIZE = 30;
 
   // Stripchat 的 HLS 现在受 Mouflon v2 保护：媒体清单必须带 psch/pkey 才返回真清单，
-  // 且真清单里的分片文件名是加密的。宿主播放器没有解密能力，所以由本地代理
-  // （~/stripchat-mouflon-proxy，launchd 常驻 127.0.0.1:8787）还原成标准 HLS。
-  // 解密代理候选项，按顺序探测，命中后缓存：
-  //   1. 本机回环——Mac 上的 AngelLive 用它，走本地进程、不消耗云端额度；
-  //   2. Cloudflare Worker——常驻在云上，iPad / iPhone / 任何设备都能用，不需要 Mac 开机；
-  //   3. Mac 的 Bonjour 名——局域网兜底（Worker 万一挂了时用）。
-  // Bonjour 名 = `scutil --get LocalHostName` + ".local"。
+  // 且真清单里的分片文件名是加密的。宿主播放器没有解密能力，必须由解密代理还原成标准 HLS。
+  //
+  // 所有设备统一只走云端 Cloudflare Worker：
+  //   - 手机 / 平板 / Mac 行为一致，出问题只看一处日志；
+  //   - 不依赖任何一台自己的机器开着机（本地进程只在 Mac 上，且出网要绕节点）；
+  //   - PROXY_HOSTS 留成数组是为了将来加备用 Worker，按顺序探测、命中后缓存。
+  // 想临时回退到 Mac 本地节点（~/stripchat-mouflon-proxy，127.0.0.1:8787），
+  // 把 { base: "http://127.0.0.1:8787", timeout: 2 } 加回数组最前面即可。
   var PROXY_HOSTS = [
-    { base: "http://127.0.0.1:8787", timeout: 2 },
-    { base: "https://stripchat-mouflon-proxy.douyin-skip-community.workers.dev", timeout: 6 },
-    { base: "http://huangzls-MacBook-Air.local:8787", timeout: 2 }
+    { base: "https://stripchat-mouflon-proxy.douyin-skip-community.workers.dev", timeout: 10 }
   ];
   var proxyBaseCache = null;
 
