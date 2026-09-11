@@ -7,9 +7,26 @@ AngelLive API v1 插件，仅枚举和播放 Stripchat `public` 状态的直播�
 - `manifest.json`：AngelLive 插件清单。
 - `main.js`：分类、房间、搜索、详情、状态和 HLS 播放实现。
 - `test.js`：`node test.js` 运行契约测试（含代理路径与直连回退路径）。
-- `stripchat-angellive-1.0.11.zip`：可安装插件包，包含 AngelLive 列表和首页平台卡片图标。
+- `stripchat-angellive-1.0.12.zip`：可安装插件包，包含 AngelLive 列表和首页平台卡片图标。
 - `worker/`：Cloudflare Worker 版解密代理源码。
 - `source-index.json`：AngelLive 订阅源索引。
+
+## 加载超时保护（闪退）
+
+AngelLive 对 `getPlayback` 有整体超时。旧版本最坏情况要串行等：
+
+- 代理探测 `2 + 10 + 2 = 14` 秒（本机 / 云端 / Bonjour 依次试）
+- 直连回退 `3 × 10 = 30` 秒（三个 CDN 域名依次试）
+
+合计 40 秒以上，宿主会先放弃，表现就是「转圈很久然后直接闪退」。
+
+现在：
+
+- `qualitiesFor` 整体加 **12 秒硬上限**，超时抛出可读的 `TIMEOUT` 错误而不是把宿主拖死；
+- 直连回退的三个 CDN 域名改为**并发**，最坏耗时从 30 秒降到 5 秒；
+- 云端代理探测超时 10 → 6 秒；
+- 解析失败的流做 **8 秒负缓存**，反复点击不会重跑整轮探测；
+- Worker 侧 `loadMaster` 也改成四域名并发 + 15 秒失败负缓存（最坏 36 秒 → 4.5 秒）。
 
 ## 播放引擎：只允许 avPlayer
 
@@ -65,7 +82,7 @@ curl -s https://stripchat-mouflon-proxy.douyin-skip-community.workers.dev/health
 
 ## 订阅
 
-把 `source-index.json` 和 `stripchat-angellive-1.0.11.zip` 一起上传到 `bbnotcode/ph_js` 的 `main`
+把 `source-index.json` 和 `stripchat-angellive-1.0.12.zip` 一起上传到 `bbnotcode/ph_js` 的 `main`
 分支根目录，然后在 AngelLive 中添加订阅地址：
 
 ```text

@@ -16,10 +16,51 @@
   // Bonjour 名 = `scutil --get LocalHostName` + ".local"。
   var PROXY_HOSTS = [
     { base: "http://127.0.0.1:8787", timeout: 2 },
-    { base: "https://stripchat-mouflon-proxy.douyin-skip-community.workers.dev", timeout: 10 },
+    { base: "https://stripchat-mouflon-proxy.douyin-skip-community.workers.dev", timeout: 6 },
     { base: "http://huangzls-MacBook-Air.local:8787", timeout: 2 }
   ];
   var proxyBaseCache = null;
+
+  // 解析超时是"加载太久直接闪退"的主因：宿主对 getPlayback 有整体超时，
+  // 之前最坏情况会串行等 2 + 10 + 2 秒探测代理、再串行等 3×10 秒直连上游，
+  // 加起来 40 秒以上。这里给整个解析过程加一个硬上限，并给失败的流做短缓存，
+  // 避免用户反复点击时每次都重跑一遍完整探测。
+  var RESOLVE_DEADLINE_MS = 12000;
+  var FAIL_TTL_MS = 8000;
+  var failureCache = {};
+
+  function firstSuccess(tasks, fallback) {
+    return new Promise(function (resolve, reject) {
+      if (!tasks.length) { reject(fallback); return; }
+      var pending = tasks.length;
+      var last = fallback || null;
+      tasks.forEach(function (task) {
+        Promise.resolve().then(task).then(resolve, function (error) {
+          if (error) last = error;
+          pending -= 1;
+          if (pending === 0) reject(last || fallback);
+        });
+      });
+    });
+  }
+
+  function withDeadline(promise, ms, message) {
+    // 宿主若没有 setTimeout 就退化成不加超时，绝不因为兜底逻辑本身抛错。
+    if (typeof setTimeout !== "function") return promise;
+    var timer = null;
+    var guard = new Promise(function (_, reject) {
+      timer = setTimeout(function () {
+        reject(Host.makeError("TIMEOUT", message, {}));
+      }, ms);
+    });
+    return Promise.race([promise, guard]).then(function (value) {
+      if (timer) clearTimeout(timer);
+      return value;
+    }, function (error) {
+      if (timer) clearTimeout(timer);
+      throw error;
+    });
+  }
 
   var CATEGORIES = [
     { id: "girls", title: "女主播", icon: "person.crop.circle", tag: "girls" },
@@ -284,12 +325,38 @@
   }
 
   async function qualitiesFor(streamId) {
+    var cached = failureCache[streamId];
+    if (cached && Date.now() - cached.at < FAIL_TTL_MS) throw cached.error;
+    try {
+      return await withDeadline(resolveQualities(streamId), RESOLVE_DEADLINE_MS,
+        "解析直播地址超过 " + Math.round(RESOLVE_DEADLINE_MS / 1000) + " 秒，已中止（主播可能刚开播或网络受限）");
+    } catch (error) {
+      failureCache[streamId] = { at: Date.now(), error: error };
+      throw error;
+    }
+  }
+
+  async function resolveQualities(streamId) {
     var last = null;
     try { return await proxyQualities(streamId); }
     catch (error) { last = error; }
     try { return await discover(streamId); }
     catch (error) { last = error; }
-    throw last;
+    throw last || Host.makeError("UPSTREAM", "没有可用的 Stripchat 线路", { streamId: streamId });
+  }
+
+  async function discoverAt(host, streamId) {
+    var master = "https://" + host + "/hls/" + streamId + "/master/" + streamId + "_auto.m3u8";
+    var text = await get(master, hlsHeaders(), 5);
+    var match = text.match(/#EXT-X-MOUFLON:PSCH:v2:([^\r\n]+)/i);
+    if (!match) throw Host.makeError("UPSTREAM", "master 未返回 pkey", { host: host });
+    var pkey = String(match[1]).trim().split(/\s+/)[0];
+    var list = variants(text, master);
+    if (!list.length) throw Host.makeError("UPSTREAM", "master 未返回画质", { host: host });
+    return list.map(function (item) {
+      var title = item.height ? String(item.height) + "p" : item.name || "自动";
+      return { title: title, qn: item.height || 0, url: playableURL(item.url, pkey) };
+    }).sort(function (a, b) { return b.qn - a.qn; });
   }
 
   async function discover(streamId) {
@@ -297,23 +364,11 @@
       "edge-hls.doppiocdn.org",
       "edge-hls.doppiocdn.com",
       "edge-hls.doppiocdn.media"
-    ], last = null;
-    for (var h = 0; h < hosts.length; h += 1) {
-      var master = "https://" + hosts[h] + "/hls/" + streamId + "/master/" + streamId + "_auto.m3u8";
-      try {
-        var text = await get(master, hlsHeaders(), 10);
-        var match = text.match(/#EXT-X-MOUFLON:PSCH:v2:([^\r\n]+)/i);
-        if (!match) throw new Error("master 未返回 pkey");
-        var pkey = String(match[1]).trim().split(/\s+/)[0];
-        var list = variants(text, master);
-        if (!list.length) throw new Error("master 未返回画质");
-        return list.map(function (item) {
-          var title = item.height ? String(item.height) + "p" : item.name || "自动";
-          return { title: title, qn: item.height || 0, url: playableURL(item.url, pkey) };
-        }).sort(function (a, b) { return b.qn - a.qn; });
-      } catch (error) { last = error; }
-    }
-    throw last || Host.makeError("UPSTREAM", "无法获取 Stripchat HLS", { streamId: streamId });
+    ];
+    // 三个 CDN 域名并发探，最坏耗时从 30 秒降到一次超时。
+    return await firstSuccess(hosts.map(function (host) {
+      return function () { return discoverAt(host, streamId); };
+    }), Host.makeError("UPSTREAM", "无法获取 Stripchat HLS", { streamId: streamId }));
   }
 
   async function resolveRoom(roomId, userId) {
