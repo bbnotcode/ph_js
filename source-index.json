@@ -1,11 +1,12 @@
 {
   "apiVersion": 1,
-  "generatedAt": "2026-09-11T00:00:00Z",
+  "generatedAt": "2026-09-11T06:00:00Z",
   "plugins": [
     {
       "pluginId": "stripchat",
-      "version": "1.0.3",
+      "version": "1.0.4",
       "changelog": [
+        "播放优先使用列表 roomId 直连 HLS，避免 cam 接口断网导致播放失败",
         "修复新版 AngelLive 安全校验下的 NETWORK invalid URL",
         "加入 AngelLive 首页平台卡片的浅色/深色图标",
         "加入 AngelLive iOS/macOS 安装后平台图标",
@@ -18,9 +19,9 @@
       "platformDescription": "Stripchat 公开直播源，支持分类、搜索、详情和多画质 HLS 播放。",
       "icon": "https://assets.chapturist.com/assets/icons/favicon-512x512_stripchat.global.png?v=2609fcdf",
       "zipURLs": [
-        "https://raw.githubusercontent.com/bbnotcode/ph_js/main/stripchat-angellive-1.0.3.zip"
+        "https://raw.githubusercontent.com/bbnotcode/ph_js/main/stripchat-angellive-1.0.4.zip"
       ],
-      "sha256": "7b816de462ec59f2a4bd288cf33f51a799c9ebb9a07c9f330241d68585d78ddd",
+      "sha256": "5378b60a08a2ad28e2a7b066663da5801c56c94c6cb63b9a97925567e86ba4e9",
       "auth": {
         "required": false,
         "credentialKinds": [],
