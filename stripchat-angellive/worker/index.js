@@ -12,7 +12,9 @@ const MEDIA_TLDS = ["org", "com", "net", "live"];
 const EDGE_TLDS = ["org", "com", "net", "live"];
 const KEY_URL = "https://mouflon.chantrail.com/api/keys";
 const KEY_TTL_MS = 6 * 3600 * 1000;
-const MASTER_TTL_MS = 20 * 1000;
+const MASTER_TTL_MS = 60 * 1000;
+const INDEX_TTL_SECONDS = 30;
+const SEGMENT_TTL_SECONDS = 120;
 
 const SEGMENT_RE = /_([^_]+)_(\d+(?:_part\d+)?)\.mp4(?:[?#].*)?/;
 const ALLOWED_UPSTREAM_HOST = /(^|\.)(doppiocdn\.(org|com|live|net)|stripchat\.(com|global))$/i;
@@ -273,9 +275,18 @@ async function fetchVariantPlaylist(master, variant, env) {
 
 /* -------------------------------- 路由 -------------------------------- */
 
-async function handleIndex(request, streamId, env) {
-  const master = await loadMaster(streamId, env);
+async function handleIndex(request, streamId, env, ctx) {
   const origin = new URL(request.url).origin;
+  const cache = typeof caches !== "undefined" ? caches.default : null;
+  const cacheKey = new Request(`${origin}/play/${encodeURIComponent(streamId)}/index.json`, { method: "GET" });
+  if (cache) {
+    try {
+      const hit = await cache.match(cacheKey);
+      if (hit) return hit;
+    } catch (_) { /* 缓存不可用就走回源 */ }
+  }
+
+  const master = await loadMaster(streamId, env);
   const variants = master.variants
     .map((variant) => ({
       name: variant.name,
@@ -285,7 +296,13 @@ async function handleIndex(request, streamId, env) {
       url: `${origin}/play/${encodeURIComponent(streamId)}/${encodeURIComponent(variant.name)}.m3u8`
     }))
     .sort((a, b) => b.height - a.height || b.bandwidth - a.bandwidth);
-  return json({ streamId, pkey: master.pkey, variants });
+
+  const response = json({ streamId, pkey: master.pkey, variants });
+  response.headers.set("Cache-Control", `public, max-age=${INDEX_TTL_SECONDS}`);
+  if (cache && ctx && typeof ctx.waitUntil === "function") {
+    ctx.waitUntil(cache.put(cacheKey, response.clone()).catch(() => {}));
+  }
+  return response;
 }
 
 async function handleMasterPlaylist(streamId, env) {
@@ -318,10 +335,21 @@ async function handleVariantPlaylist(streamId, name, env) {
   return text(rewritten.playlist, 200, "application/vnd.apple.mpegurl");
 }
 
-async function handleSegment(url, env) {
+async function handleSegment(url, env, ctx) {
   const raw = url.searchParams.get("u");
   const pkey = url.searchParams.get("k") || "";
   if (!raw) return text("missing u", 400);
+
+  // 直播分片一旦发布内容就不再变化，URL 里带序号和签名，可以按 URL 安全缓存。
+  // 同一路直播的两个设备、播放器重拉同一个分片，都能直接命中边缘缓存。
+  const cache = typeof caches !== "undefined" ? caches.default : null;
+  const cacheKey = new Request(url.toString(), { method: "GET" });
+  if (cache) {
+    try {
+      const hit = await cache.match(cacheKey);
+      if (hit) return hit;
+    } catch (_) { /* 缓存不可用就走回源 */ }
+  }
 
   let encryptedURL;
   try { encryptedURL = unb64url(raw); } catch (_) { return text("bad u", 400); }
@@ -342,30 +370,34 @@ async function handleSegment(url, env) {
   if (!res.ok) {
     return text(`上游分片 HTTP ${res.status}（多为分片已过期，播放器会自行续拉）`, 502);
   }
-  return new Response(res.body, {
+  const response = new Response(res.body, {
     status: 200,
     headers: {
       "Content-Type": "video/mp4",
-      "Cache-Control": "no-store",
+      "Cache-Control": `public, max-age=${SEGMENT_TTL_SECONDS}`,
       "Access-Control-Allow-Origin": "*"
     }
   });
+  if (cache && ctx && typeof ctx.waitUntil === "function") {
+    ctx.waitUntil(cache.put(cacheKey, response.clone()).catch(() => {}));
+  }
+  return response;
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
     const pathname = decodeURIComponent(url.pathname);
     try {
       if (pathname === "/health") return json({ ok: true, runtime: "cloudflare-worker" });
-      if (pathname === "/seg" || /^\/seg\/[^/]*\.mp4$/.test(pathname)) return await handleSegment(url, env);
+      if (pathname === "/seg" || /^\/seg\/[^/]*\.mp4$/.test(pathname)) return await handleSegment(url, env, ctx);
 
       const play = pathname.match(/^\/play\/([^/]+?)(?:\/([^/]+))?\.m3u8$/);
       if (play) {
         return play[2] ? await handleVariantPlaylist(play[1], play[2], env) : await handleMasterPlaylist(play[1], env);
       }
       const index = pathname.match(/^\/play\/([^/]+)\/index\.json$/);
-      if (index) return await handleIndex(request, index[1], env);
+      if (index) return await handleIndex(request, index[1], env, ctx);
 
       return text("not found", 404);
     } catch (error) {

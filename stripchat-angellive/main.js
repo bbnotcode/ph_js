@@ -15,9 +15,9 @@
   //   3. Mac 的 Bonjour 名——局域网兜底（Worker 万一挂了时用）。
   // Bonjour 名 = `scutil --get LocalHostName` + ".local"。
   var PROXY_HOSTS = [
-    { base: "http://127.0.0.1:8787", timeout: 3 },
-    { base: "https://stripchat-mouflon-proxy.douyin-skip-community.workers.dev", timeout: 8 },
-    { base: "http://huangzls-MacBook-Air.local:8787", timeout: 5 }
+    { base: "http://127.0.0.1:8787", timeout: 2 },
+    { base: "https://stripchat-mouflon-proxy.douyin-skip-community.workers.dev", timeout: 10 },
+    { base: "http://huangzls-MacBook-Air.local:8787", timeout: 2 }
   ];
   var proxyBaseCache = null;
 
@@ -132,15 +132,20 @@
     return ["girls", "couples", "men", "trans"].indexOf(value) >= 0 ? value : "girls";
   }
 
+  var tagKeyCache = {};
+
   async function tagKey(tag) {
     if (String(tag).indexOf("/") < 0) return "";
+    if (tagKeyCache[tag]) return tagKeyCache[tag];
     var path = "/api/front/v2/models?primaryTag=" + encodeURIComponent(primaryTag(tag))
       + "&limit=24&topLimit=61&favoritesLimit=24&msBlock=true&removeShows=true&nic=true&uniq=" + Date.now().toString(36);
     var blocks = payload(await currentAPI(path, 20)).blocks || [];
     for (var i = 0; i < blocks.length; i += 1) {
       if (String(blocks[i] && blocks[i].url || "") === String(tag)) {
         var id = String(blocks[i].tagId || "");
-        return id.indexOf(".") >= 0 ? id.split(".").pop() : id;
+        var key = id.indexOf(".") >= 0 ? id.split(".").pop() : id;
+        if (key) tagKeyCache[tag] = key;
+        return key;
       }
     }
     return "";
@@ -238,51 +243,44 @@
     return { "Accept": "application/vnd.apple.mpegurl, application/x-mpegURL, */*" };
   }
 
-  async function proxyHealth(candidate) {
+  // 直接用 index.json 当健康检查：省掉一次 /health 往返，能播时只发一个请求。
+  async function proxyQualitiesAt(candidate, streamId) {
+    var url = candidate.base + "/play/" + encodeURIComponent(streamId) + "/index.json";
     var response = await Host.http.request({
-      request: {
-        url: candidate.base + "/health",
-        method: "GET",
-        headers: { "Accept": "application/json" },
-        timeout: candidate.timeout || 5
-      }
+      request: { url: url, method: "GET", headers: { "Accept": "application/json" }, timeout: candidate.timeout || 5 }
     });
     if (!response || Number(response.status || 0) !== 200) {
-      throw Host.makeError("PROXY", "Mouflon 解密代理健康检查失败", { url: candidate.base });
-    }
-    return true;
-  }
-
-  async function resolveProxyBase() {
-    if (proxyBaseCache) {
-      try { await proxyHealth(proxyBaseCache); return proxyBaseCache.base; }
-      catch (_) { proxyBaseCache = null; }
-    }
-    var last = null;
-    for (var i = 0; i < PROXY_HOSTS.length; i += 1) {
-      try { await proxyHealth(PROXY_HOSTS[i]); proxyBaseCache = PROXY_HOSTS[i]; return PROXY_HOSTS[i].base; }
-      catch (error) { last = error; }
-    }
-    throw last || Host.makeError("PROXY", "Mouflon 解密代理不可达", {});
-  }
-
-  async function proxyQualities(streamId) {
-    var base = await resolveProxyBase();
-    var url = base + "/play/" + encodeURIComponent(streamId) + "/index.json";
-    var response = await Host.http.request({
-      request: { url: url, method: "GET", headers: { "Accept": "application/json" }, timeout: 8 }
-    });
-    if (!response || Number(response.status || 0) !== 200) {
-      throw Host.makeError("PROXY", "本地 Mouflon 代理无响应 (HTTP " + String(response && response.status || 0) + ")", { url: url });
+      throw Host.makeError("PROXY", "Mouflon 解密代理无响应 (HTTP " + String(response && response.status || 0) + ")", { url: url });
     }
     var data = null;
     try { data = JSON.parse(String(response.bodyText || "")); }
-    catch (_) { throw Host.makeError("PROXY", "本地 Mouflon 代理返回了无效 JSON", { url: url }); }
+    catch (_) { throw Host.makeError("PROXY", "Mouflon 解密代理返回了无效 JSON", { url: url }); }
     var variants = data && data.variants || [];
-    if (!variants.length) throw Host.makeError("PROXY", "本地 Mouflon 代理未返回可用画质", { url: url });
+    if (!variants.length) throw Host.makeError("PROXY", "Mouflon 解密代理未返回可用画质", { url: url });
     return variants.map(function (item) {
       return { title: item.title || item.name || "自动", qn: item.height || 0, url: item.url, local: true };
     }).sort(function (a, b) { return b.qn - a.qn; });
+  }
+
+  async function proxyQualities(streamId) {
+    // 命中过的代理排在最前，其余按配置顺序兜底。
+    var order = [];
+    if (proxyBaseCache) order.push(proxyBaseCache);
+    for (var i = 0; i < PROXY_HOSTS.length; i += 1) {
+      if (!proxyBaseCache || PROXY_HOSTS[i].base !== proxyBaseCache.base) order.push(PROXY_HOSTS[i]);
+    }
+    var last = null;
+    for (var j = 0; j < order.length; j += 1) {
+      try {
+        var list = await proxyQualitiesAt(order[j], streamId);
+        proxyBaseCache = order[j];
+        return list;
+      } catch (error) {
+        last = error;
+        if (proxyBaseCache && order[j].base === proxyBaseCache.base) proxyBaseCache = null;
+      }
+    }
+    throw last || Host.makeError("PROXY", "Mouflon 解密代理不可达", {});
   }
 
   async function qualitiesFor(streamId) {
@@ -355,7 +353,12 @@
       var keyword = String(input && input.keyword || "").trim().toLowerCase();
       if (!keyword) return [];
       var groups = ["girls", "couples", "men"], all = [];
-      for (var i = 0; i < groups.length; i += 1) all = all.concat(await fetchModels(groups[i], input && input.page || 1));
+      var page = input && input.page || 1;
+      // 三组并发拉取，串行的话要等三个 API 往返。
+      var results = await Promise.all(groups.map(function (group) {
+        return fetchModels(group, page).catch(function () { return []; });
+      }));
+      for (var i = 0; i < results.length; i += 1) all = all.concat(results[i]);
       var seen = {};
       return all.filter(function (model) {
         var name = String(model.username || model.name || model.nickname || "").toLowerCase();

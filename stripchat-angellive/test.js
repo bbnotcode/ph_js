@@ -53,8 +53,8 @@ const context = {
           return { status: 200, bodyText: JSON.stringify({ ok: true }) };
         }
         if (url.includes("/play/") && url.endsWith("/index.json")) {
-          proxyRequests.push(url);
           if (!proxyAvailable || new URL(url).host.toLowerCase() !== proxyHost.toLowerCase()) throw new Error("connect ECONNREFUSED " + new URL(url).host);
+          proxyRequests.push(url);
           assert.strictEqual(options.request.headers.Accept, "application/json");
           return {
             status: 200,

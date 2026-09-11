@@ -1,10 +1,13 @@
 {
   "pluginId": "stripchat",
-  "version": "1.0.9",
+  "version": "1.0.10",
   "apiVersion": 1,
   "displayName": "Stripchat 直播",
   "platformDescription": "Stripchat 公开直播源，支持分类、搜索、主播详情和多画质 HLS 播放。播放经本地/云端 Mouflon 解密代理还原为标准 HLS。仅限年满 18 岁的用户使用。",
   "changelog": [
+    "1.0.10: 起播只发一个请求（清单请求兼作健康检查），省掉一次代理往返",
+    "1.0.10: 分类标签结果缓存、搜索改为并发，列表加载更快",
+    "1.0.10: 缩短本机/Bonjour 代理探测超时，避免网络慢时长时间等待",
     "接入云端解密代理（Cloudflare Worker），iPad / iPhone 等任意设备无需 Mac 开机即可播放",
     "1.0.8: 新增本地 Mouflon v2 解密代理，把加密 HLS 还原成标准清单，修复无法出画",
     "1.0.7: 多 CDN/多 pkey 探测，区分 Mouflon 加密失败与真下播，减少误报「主播已下播」",

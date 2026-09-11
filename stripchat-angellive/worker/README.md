@@ -18,6 +18,9 @@ npx wrangler deploy
 
 改动 `index.js` 后重新 deploy 即可；插件端不用动（地址不变）。
 
+`~/stripchat-mouflon-proxy/worker/src/index.js` 是实际部署的那份，本目录与它保持一致，
+改动后请同步过去再 deploy。
+
 ## 密钥
 
 内置了社区公开的 `pkey -> pdkey` 兜底表，运行时每 6 小时从
