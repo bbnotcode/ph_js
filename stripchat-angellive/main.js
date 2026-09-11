@@ -206,11 +206,29 @@
     return ROOM_KIND_LABELS[kind] || "";
   }
 
-  function paidReason(kind) {
+  // 「播不了」时必须说清是哪一种，用户才知道是自己要付费、还是主播没播、还是线路抖动。
+  function blockedReason(kind) {
+    if (kind === "offline") return "该主播当前没有在直播（已下播）";
     if (kind === "ticket") return "该主播当前是门票场，需要先购票才能观看；AngelLive 播放不了付费场次";
     if (kind === "group") return "该主播当前在组秀中，AngelLive 播放不了组秀场次";
     if (kind === "private") return "该主播当前在私密秀中，AngelLive 播放不了私密场次";
-    return "该主播当前是付费场次，AngelLive 播放不了需要付费的内容";
+    if (kind === "paid") return "该主播当前是付费场次，AngelLive 播放不了需要付费的内容";
+    return "该主播当前不是公开直播，AngelLive 播放不了这个场次";
+  }
+
+  // 底层失败统一翻译成一句带原因的中文。
+  // 以前这些路径会把 "Mouflon 解密代理无响应 (HTTP 502)" 这类内部文案直接抛给用户，
+  // 既看不出原因，也分不清「主播没播」和「线路抖了一下」。
+  function failureReason(error) {
+    var code = String(error && error.code || "");
+    var raw = String(error && error.message || "").trim();
+    if (code === "OFFLINE" || /\b404\b/.test(raw)) return "该主播当前没有在直播（已下播）";
+    if (code === "TIMEOUT") return "解析直播地址超时——网络较慢或上游没有响应，请稍后重试；这不代表主播下播";
+    if (code === "PROXY" || code === "UPSTREAM") {
+      return "直播线路暂时不稳定（" + (raw || "上游无响应") + "），请稍后重试；这不代表主播下播";
+    }
+    if (code === "NETWORK") return "连不上 Stripchat 接口，可能是网络或节点问题，请稍后重试";
+    return raw || "暂时无法解析这个直播间的播放地址";
   }
 
   // /api/front/v2/* 返回的是相对路径（/previews/... 、/avatars/...），
@@ -571,16 +589,20 @@
         try { model = await fetchCam(username); }
         catch (error) { camError = error; }
         if (!model) {
-          // 问不到主播状态（cam 被反爬拦截），
-          // 退回到直接解析的错误。
-          throw directError || camError || Host.makeError("NOT_LIVE", "拿不到主播当前状态", { username: username });
+          // 问不到主播状态（cam 被反爬拦截），退回到直接解析的错误。
+          // 但不能再把内部文案原样抛出——用户要的是「为什么不能看」。
+          var cause = directError || camError || null;
+          throw Host.makeError("NOT_LIVE", failureReason(cause), {
+            username: username,
+            cause: cause ? String(cause.code || "") + ": " + String(cause.message || "") : ""
+          });
         }
         // 付费 / 私密场次必须在 directError 之前报出来：
         // 这类房间没有公开分片，直接解析 roomId 失败是必然的，
         // 如果先报 directError，用户看到的只会是一句看不懂的代理错误。
         var kind = roomKind(model);
         if (kind !== "public") {
-          throw Host.makeError("NOT_LIVE", paidReason(kind), {
+          throw Host.makeError("NOT_LIVE", blockedReason(kind), {
             username: username,
             status: String(model.status || ""),
             groupShowType: String(model.groupShowType || "")
@@ -589,9 +611,22 @@
         var currentStreamId = streamName(model);
         if (!currentStreamId) throw Host.makeError("NOT_LIVE", "主播当前没有可用直播流", { username: username });
         try { qualitys = await qualitiesFor(currentStreamId); }
-        catch (streamError) { throw directError || streamError; }
+        catch (streamError) {
+          var failed = directError || streamError;
+          throw Host.makeError(failed.code || "UPSTREAM", failureReason(failed), {
+            username: username,
+            cause: String(failed.message || "")
+          });
+        }
       }
-      if (!qualitys) throw directError || Host.makeError("NOT_LIVE", "没有可用直播流", { roomId: roomId });
+      if (!qualitys) {
+        if (directError) {
+          throw Host.makeError(directError.code || "UPSTREAM", failureReason(directError), {
+            roomId: roomId, cause: String(directError.message || "")
+          });
+        }
+        throw Host.makeError("NOT_LIVE", "该主播当前没有可用的直播流", { roomId: roomId });
+      }
       return [{
         cdn: "stripchat-official",
         displayName: "Stripchat 官方线路",

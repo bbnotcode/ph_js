@@ -7,7 +7,7 @@ AngelLive API v1 插件，仅枚举和播放 Stripchat `public` 状态的直播�
 - `manifest.json`：AngelLive 插件清单。
 - `main.js`：分类、房间、搜索、详情、状态和 HLS 播放实现。
 - `test.js`：`node test.js` 运行契约测试（含代理路径与直连回退路径）。
-- `stripchat-angellive-1.0.20.zip`：可安装插件包，包含 AngelLive 列表和首页平台卡片图标。
+- `stripchat-angellive-1.0.21.zip`：可安装插件包，包含 AngelLive 列表和首页平台卡片图标。
 - `worker/`：Cloudflare Worker 版解密代理源码。
 - `source-index.json`：AngelLive 订阅源索引。
 
@@ -171,6 +171,35 @@ AngelLive 对图标的渲染方式是固定的，插件只能适配：
 
 这正好解释了那个现象：卡住的直播间退回首页刷新一下、过十几秒再进就恢复了。
 
+## 竖屏直播没有播放/暂停按钮（宿主行为，插件改不了）
+
+宿主有两套播放控制层，**按视频真实比例二选一**：
+
+| 视频比例 | 控制层 | 有哪些按钮 |
+| --- | --- | --- |
+| `ratio >= 1.0`（横屏） | `UnifiedPlayerControlOverlay` | 中间大播放键、**左下播放/暂停 + 刷新**、右下弹幕/清晰度/全屏 |
+| `ratio < 1.0`（竖屏） | `VerticalLiveControllerView` | 顶部返回 / 主播信息 / **收藏**；左下弹幕；右下 **「更多」按钮** |
+
+判定代码在 `PlayerContainerView.swift`：`let ratio = naturalSize.width / naturalSize.height`，
+`let isVerticalLive = isPortrait`（即 `ratio < 1.0`）。
+
+**Stripchat 的主播画面基本都是竖的**（摄像头原始比例 1000×2500 一类），所以一进直播间就落进
+竖屏那一套——那套层里**压根没有做播放/暂停按钮**，刷新也塞在右下角「更多」里面。
+宿主本地控制层的绘制里，中间那个大播放键的显示条件是
+`!bridge.isPlaying && !bridge.isBuffering && !bridge.isInitialLoading`
+（且只在 `UnifiedPlayerControlOverlay` 里），所以竖屏 + 「画面定格但宿主认为还在播」时，
+屏幕上不会有任何播放/暂停入口。这不是插件造成的，`naturalSize` 来自真实视频轨，插件无法伪造。
+
+**竖屏直播间卡住时的出路：**
+
+- 点右下角「**更多**」→ 里面就有**刷新播放**（`onRefreshPlayback`），不用退回首页下拉刷新；
+- 或者在 App **设置 → 播放器内核 → VLC 4.0**：宿主对竖屏模式的控制层选择是
+  `if isVerticalLiveMode && useKSPlayer { 竖屏控制层 } else { 统一控制层 }`，
+  换内核后 `useKSPlayer == false`，竖屏直播也会走带播放/刷新按钮的统一控制层。
+
+> 真要根治得 AngelLive 给 `VerticalLiveControllerView` 补上播放/暂停与刷新。插件侧没有任何
+> UI 接口（`LivePlaybackHints` 只有流语义字段），改不了。
+
 ## 付费 / 私密 / 组秀场次（1.0.18 修正）
 
 Stripchat 的房间状态不止「公开」和「没播」两种。`/api/front/models` 里会返回
@@ -188,7 +217,21 @@ Stripchat 的房间状态不止「公开」和「没播」两种。`/api/front/m
 | --- | --- | --- | --- | --- |
 | 公开 | 显示 | 无 | `1` | 正常播放 |
 | 门票场 / 组秀 / 私密 / 其他付费 | **显示** | `· 门票场` 等 | `1` | 抛 `NOT_LIVE` + 人话提示 |
-| 真下播（`isLive: false`） | 过滤 | — | `0` | — |
+| 真下播（`isLive: false`） | 过滤 | — | `0` | 记录收藏进入时提示「已下播」 |
+
+「播不了」的每一种原因都有一句专门的话（`blockedReason` / `failureReason`）：
+
+| 情况 | 用户看到的话 |
+| --- | --- |
+| 已下播 | 该主播当前没有在直播（已下播） |
+| 门票场 | 该主播当前是门票场，需要先购票才能观看；AngelLive 播放不了付费场次 |
+| 组秀 / 私密 / 其他付费 | 该主播当前在组秀中 / 在私密秀中 / 是付费场次…… |
+| 上游 502 抖动 | 直播线路暂时不稳定（上游 HTTP 502），请稍后重试；**这不代表主播下播** |
+| 解析超时 | 解析直播地址超时——网络较慢或上游没有响应，请稍后重试；这不代表主播下播 |
+| 连不上接口 | 连不上 Stripchat 接口，可能是网络或节点问题，请稍后重试 |
+
+以前这些路径会把 `Mouflon 解密代理无响应 (HTTP 502)` 这类内部文案原样抛给用户，
+既看不出原因，也分不清「主播没播」和「线路抖了一下」。
 
 两个关键点：
 
@@ -216,7 +259,7 @@ Stripchat 的房间状态不止「公开」和「没播」两种。`/api/front/m
 
 ## 订阅
 
-把 `source-index.json` 和 `stripchat-angellive-1.0.20.zip` 一起上传到 `bbnotcode/ph_js` 的 `main`
+把 `source-index.json` 和 `stripchat-angellive-1.0.21.zip` 一起上传到 `bbnotcode/ph_js` 的 `main`
 分支根目录，然后在 AngelLive 中添加订阅地址：
 
 ```text

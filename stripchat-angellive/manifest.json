@@ -1,10 +1,16 @@
 {
   "pluginId": "stripchat",
-  "version": "1.0.20",
+  "version": "1.0.21",
   "apiVersion": 1,
   "displayName": "Stripchat 直播",
   "platformDescription": "Stripchat 公开直播源，支持分类、搜索、主播详情和多画质 HLS 播放。解密后的分片地址由播放器直连官方 CDN，视频流量不经过中转，仅清单经云端代理还原。仅限年满 18 岁的用户使用。",
   "changelog": [
+    "1.0.21: 播不了的时候必须说清原因——已下播 / 门票场 / 组秀 / 私密 / 付费场次 / 线路 502 抖动 / 解析超时 / 连不上接口，每种情况各有一句人话；以前这条路径会把「Mouflon 解密代理无响应 (HTTP 502)」这类内部文案原样抛给用户，既看不出原因也分不清是没播还是线路抖了一下",
+    "1.0.21: 修复离线主播被误报成付费——房间状态是 offline 时 getPlayback 会走到付费分支，提示「该主播当前是付费场次」；现在正确提示「该主播当前没有在直播（已下播）」",
+    "1.0.21: 上游抖动（Worker 回 502）的提示里明确写上「这不代表主播下播」，和 1.0.16 的 404 / 502 区分保持一致",
+    "1.0.21: 修复测试基建——expectFailure 之前会把任务内部的断言失败也当成「成功抛错」吞掉，导致写在里面的断言静默失效；现在 AssertionError 会原样抛出（本次新增的多条断言都做了负向验证）",
+    "1.0.20: 把播放引擎的选择权完全交还宿主——直接删掉 playbackHints.preferredEngines 字段，不再把宿主的默认策略抄一份到插件里。宿主对非 LL-HLS 直播的默认顺序是 [mePlayer, avPlayer]（主路 KSMEPlayer 有零吞吐 stall 自愈，起不来时自动回退 KSAVPlayer）；宿主以后调默认顺序或加新引擎，插件都自动跟随，不用再为引擎顺序发版",
+    "1.0.20: 插件能表达的引擎只有 mePlayer / avPlayer 两个（LivePlaybackEngine 枚举），宿主还有的 VLC 4.0 是 App 设置里的开关、插件无权指定；想换内核在 App 设置里切即可，不用改插件",
     "1.0.20: 把播放引擎的选择权完全交还宿主——直接删掉 playbackHints.preferredEngines 字段，不再把宿主的默认策略抄一份到插件里。宿主对非 LL-HLS 直播的默认顺序是 [mePlayer, avPlayer]（主路 KSMEPlayer 有零吞吐 stall 自愈，起不来时自动回退 KSAVPlayer）；宿主以后调默认顺序或加新引擎，插件都自动跟随，不用再为引擎顺序发版",
     "1.0.20: 插件能表达的引擎只有 mePlayer / avPlayer 两个（LivePlaybackEngine 枚举），宿主还有的 VLC 4.0 是 App 设置里的开关、插件无权指定；想换内核在 App 设置里切即可，不用改插件",
     "1.0.19: 直播卡住后恢复能力对齐其他订阅源——插件从 1.0.11 起把播放引擎写死成 avPlayer，而宿主 PlaybackTuning 里零吞吐 watchdog（stallMonitoringEnabled）只在 KSME 主路开启、KSAV 是关的，等于 Stripchat 是唯一一条卡住后没有任何自愈的链路",

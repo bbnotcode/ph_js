@@ -115,9 +115,13 @@ vm.createContext(context);
 vm.runInContext(fs.readFileSync(__dirname + "/main.js", "utf8"), context);
 
 async function expectFailure(label, task) {
-  let failed = false;
-  try { await task(); } catch (_) { failed = true; }
-  assert.ok(failed, label + "：必须抛错而不是返回结果");
+  let failure = null;
+  try { await task(); } catch (error) { failure = error; }
+  assert.ok(failure, label + "：必须抛错而不是返回结果");
+  // 任务内部的断言失败必须原样抛出。否则 AssertionError 会被上面的 catch 吞掉，
+  // 被当成「确实抛错了」而静默通过，任务里的断言等于没写。
+  if (failure.name === "AssertionError") throw failure;
+  return failure;
 }
 
 (async () => {
@@ -326,6 +330,40 @@ async function expectFailure(label, task) {
   indexStatus = 200;
   extraModels = [];
   camModelFor = {};
+
+  // ---- 播不了的时候必须说清「原因」----
+  // 用户点开一个直播间播不了时，最需要知道的是：是我要付费？主播没播？还是线路抖了？
+  extraModels = [offlineModel];
+  camModelFor = { gone_user: offlineModel };
+  indexStatus = 404;
+  await expectFailure("主播已下播要说『已下播』", async () => {
+    try {
+      await plugin.getPlayback({ roomId: "900002", userId: "gone_user" });
+    } catch (error) {
+      assert.ok(/已下播|没有在直播/.test(error.message), "必须说明是已下播：" + error.message);
+      throw error;
+    }
+  });
+
+  // 上游抖动（Worker 回 502）绝不能说成「已下播」。
+  // 以前这条路径会把 "Mouflon 解密代理无响应 (HTTP 502)" 原样抛给用户。
+  extraModels = [];
+  camModelFor = {};
+  indexStatus = 502;
+  failCam = true;
+  await expectFailure("上游抖动要说明是线路问题", async () => {
+    try {
+      // 独立 roomId：失败结论进 4 秒失败缓存，换 id 才能测到真实路径。
+      await plugin.getPlayback({ roomId: "444444", userId: "demo_user" });
+    } catch (error) {
+      assert.ok(/线路暂时不稳定/.test(error.message), "要说明是线路问题：" + error.message);
+      assert.ok(/不代表主播下播/.test(error.message), "必须明确不是下播：" + error.message);
+      assert.ok(!/^(HTTP|Mouflon)/.test(error.message), "不能把内部文案当标题：" + error.message);
+      throw error;
+    }
+  });
+  indexStatus = 200;
+  failCam = false;
 
   // ---- 复制直播间链接 / 在浏览器打开 ----
   // stripchat.com 在部分网络下不可达（本机实测解析到 127.0.0.1，浏览器直接报"无法访问此网站"），
