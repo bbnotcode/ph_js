@@ -7,7 +7,7 @@ AngelLive API v1 插件，仅枚举和播放 Stripchat `public` 状态的直播�
 - `manifest.json`：AngelLive 插件清单。
 - `main.js`：分类、房间、搜索、详情、状态和 HLS 播放实现。
 - `test.js`：`node test.js` 运行契约测试（含代理路径与直连回退路径）。
-- `stripchat-angellive-1.0.21.zip`：可安装插件包，包含 AngelLive 列表和首页平台卡片图标。
+- `stripchat-angellive-1.0.22.zip`：可安装插件包，包含 AngelLive 列表和首页平台卡片图标。
 - `worker/`：Cloudflare Worker 版解密代理源码。
 - `source-index.json`：AngelLive 订阅源索引。
 
@@ -219,7 +219,9 @@ Stripchat 的房间状态不止「公开」和「没播」两种。`/api/front/m
 | 门票场 / 组秀 / 私密 / 其他付费 | **显示** | `· 门票场` 等 | `1` | 抛 `NOT_LIVE` + 人话提示 |
 | 真下播（`isLive: false`） | 过滤 | — | `0` | 记录收藏进入时提示「已下播」 |
 
-「播不了」的每一种原因都有一句专门的话（`blockedReason` / `failureReason`）：
+「播不了」的每一种原因都有一句专门的话（`blockedReason` / `failureReason`），
+**并且句尾一定会附上该主播的官网页面地址**，你可以自己到浏览器打开核实
+「到底是他真的收费了，还是我们这条线路的问题」：
 
 | 情况 | 用户看到的话 |
 | --- | --- |
@@ -229,6 +231,17 @@ Stripchat 的房间状态不止「公开」和「没播」两种。`/api/front/m
 | 上游 502 抖动 | 直播线路暂时不稳定（上游 HTTP 502），请稍后重试；**这不代表主播下播** |
 | 解析超时 | 解析直播地址超时——网络较慢或上游没有响应，请稍后重试；这不代表主播下播 |
 | 连不上接口 | 连不上 Stripchat 接口，可能是网络或节点问题，请稍后重试 |
+
+提示长这样（例）：
+
+```text
+该主播当前是门票场，需要先购票才能观看；AngelLive 播放不了付费场次。
+要核实可直接在浏览器打开：https://zh.stripchat.global/TFOOTF
+```
+
+链接由 `main.js` 的 `ROOM_PAGE_BASE` 拼出，**必须和 `manifest.json` 里
+`hostBehavior.externalRoomURLTemplate`（「复制直播间链接 / 在浏览器打开」用的那个）
+同源**——`test.js` 里有断言把两者锁在一起，改了一个不改另一个会直接测失败。
 
 以前这些路径会把 `Mouflon 解密代理无响应 (HTTP 502)` 这类内部文案原样抛给用户，
 既看不出原因，也分不清「主播没播」和「线路抖了一下」。
@@ -259,7 +272,7 @@ Stripchat 的房间状态不止「公开」和「没播」两种。`/api/front/m
 
 ## 订阅
 
-把 `source-index.json` 和 `stripchat-angellive-1.0.21.zip` 一起上传到 `bbnotcode/ph_js` 的 `main`
+把 `source-index.json` 和 `stripchat-angellive-1.0.22.zip` 一起上传到 `bbnotcode/ph_js` 的 `main`
 分支根目录，然后在 AngelLive 中添加订阅地址：
 
 ```text

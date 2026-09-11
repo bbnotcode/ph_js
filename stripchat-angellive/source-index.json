@@ -1,11 +1,14 @@
 {
   "apiVersion": 1,
-  "generatedAt": "2026-09-11T15:46:39Z",
+  "generatedAt": "2026-09-11T15:49:52Z",
   "plugins": [
     {
       "pluginId": "stripchat",
-      "version": "1.0.21",
+      "version": "1.0.22",
       "changelog": [
+        "1.0.22: 播不了的提示里直接带上主播官网链接，方便自己核实「到底是他真收费了，还是线路问题」——例：该主播当前是门票场，需要先购票才能观看；AngelLive 播放不了付费场次。要核实可直接在浏览器打开：https://zh.stripchat.global/TFOOTF",
+        "1.0.22: 该链接和「复制直播间链接 / 在浏览器打开」同源（都用 zh.stripchat.global/{userId} 模板），test.js 加了断言把 main.js 的 ROOM_PAGE_BASE 和 manifest 的 externalRoomURLTemplate 锁在一起，改一个不改另一个会直接测失败",
+        "1.0.22: 链接覆盖所有播不了的路径——付费场次 / 已下播 / 上游抖动 / 解析超时 / 连不上接口 / 没有可用流，都会在句尾附上官网地址",
         "1.0.21: 播不了的时候必须说清原因——已下播 / 门票场 / 组秀 / 私密 / 付费场次 / 线路 502 抖动 / 解析超时 / 连不上接口，每种情况各有一句人话；以前这条路径会把「Mouflon 解密代理无响应 (HTTP 502)」这类内部文案原样抛给用户，既看不出原因也分不清是没播还是线路抖了一下",
         "1.0.21: 修复离线主播被误报成付费——房间状态是 offline 时 getPlayback 会走到付费分支，提示「该主播当前是付费场次」；现在正确提示「该主播当前没有在直播（已下播）」",
         "1.0.21: 上游抖动（Worker 回 502）的提示里明确写上「这不代表主播下播」，和 1.0.16 的 404 / 502 区分保持一致",
@@ -74,10 +77,10 @@
       "platformDescription": "Stripchat 公开直播源，支持分类、搜索、主播详情和多画质 HLS 播放。解密后的分片地址由播放器直连官方 CDN，视频流量不经过中转，仅清单经云端代理还原。仅限年满 18 岁的用户使用。",
       "icon": "https://assets.chapturist.com/assets/icons/favicon-512x512_stripchat.global.png?v=2609fcdf",
       "zipURLs": [
-        "https://raw.githubusercontent.com/bbnotcode/ph_js/main/stripchat-angellive-1.0.21.zip",
-        "https://cdn.jsdelivr.net/gh/bbnotcode/ph_js@main/stripchat-angellive-1.0.21.zip"
+        "https://raw.githubusercontent.com/bbnotcode/ph_js/main/stripchat-angellive-1.0.22.zip",
+        "https://cdn.jsdelivr.net/gh/bbnotcode/ph_js@main/stripchat-angellive-1.0.22.zip"
       ],
-      "sha256": "160418998ef2ce6a904ae0bcaadc675224206033882a157c0466f17080b90b0d",
+      "sha256": "cd741c92348d9a151e46a22d040321f43109d5e098761af2fef99c6c941d6528",
       "auth": {
         "required": false,
         "credentialKinds": [],

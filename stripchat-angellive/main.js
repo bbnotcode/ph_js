@@ -206,6 +206,25 @@
     return ROOM_KIND_LABELS[kind] || "";
   }
 
+  // 主播官网页面。必须和 manifest.json 的 hostBehavior.externalRoomURLTemplate 保持一致
+  // （那一个给「复制直播间链接 / 在浏览器打开」用，这一个给播放失败的提示用），
+  // test.js 里有断言锁住两者同源。
+  // 用 zh.stripchat.global 而不是 stripchat.com：后者在部分网络下不可达
+  // （实测解析到 127.0.0.1，浏览器直接报「无法访问此网站」）。
+  var ROOM_PAGE_BASE = "https://zh.stripchat.global/";
+
+  function roomPageURL(username) {
+    var name = String(username || "").trim();
+    return name ? ROOM_PAGE_BASE + encodeURIComponent(name) : "";
+  }
+
+  // 播不了的时候除了说清原因，还要把官网地址给出来——用户可以自己到浏览器打开，
+  // 核实到底是收费场次、已经下播，还是我们这条线路的问题。
+  function withRoomLink(message, username) {
+    var url = roomPageURL(username);
+    return url ? message + "。要核实可直接在浏览器打开：" + url : message;
+  }
+
   // 「播不了」时必须说清是哪一种，用户才知道是自己要付费、还是主播没播、还是线路抖动。
   function blockedReason(kind) {
     if (kind === "offline") return "该主播当前没有在直播（已下播）";
@@ -592,7 +611,7 @@
           // 问不到主播状态（cam 被反爬拦截），退回到直接解析的错误。
           // 但不能再把内部文案原样抛出——用户要的是「为什么不能看」。
           var cause = directError || camError || null;
-          throw Host.makeError("NOT_LIVE", failureReason(cause), {
+          throw Host.makeError("NOT_LIVE", withRoomLink(failureReason(cause), username), {
             username: username,
             cause: cause ? String(cause.code || "") + ": " + String(cause.message || "") : ""
           });
@@ -602,18 +621,20 @@
         // 如果先报 directError，用户看到的只会是一句看不懂的代理错误。
         var kind = roomKind(model);
         if (kind !== "public") {
-          throw Host.makeError("NOT_LIVE", blockedReason(kind), {
+          throw Host.makeError("NOT_LIVE", withRoomLink(blockedReason(kind), username), {
             username: username,
             status: String(model.status || ""),
             groupShowType: String(model.groupShowType || "")
           });
         }
         var currentStreamId = streamName(model);
-        if (!currentStreamId) throw Host.makeError("NOT_LIVE", "主播当前没有可用直播流", { username: username });
+        if (!currentStreamId) {
+          throw Host.makeError("NOT_LIVE", withRoomLink("该主播当前没有可用的直播流", username), { username: username });
+        }
         try { qualitys = await qualitiesFor(currentStreamId); }
         catch (streamError) {
           var failed = directError || streamError;
-          throw Host.makeError(failed.code || "UPSTREAM", failureReason(failed), {
+          throw Host.makeError(failed.code || "UPSTREAM", withRoomLink(failureReason(failed), username), {
             username: username,
             cause: String(failed.message || "")
           });
@@ -621,11 +642,11 @@
       }
       if (!qualitys) {
         if (directError) {
-          throw Host.makeError(directError.code || "UPSTREAM", failureReason(directError), {
+          throw Host.makeError(directError.code || "UPSTREAM", withRoomLink(failureReason(directError), username), {
             roomId: roomId, cause: String(directError.message || "")
           });
         }
-        throw Host.makeError("NOT_LIVE", "该主播当前没有可用的直播流", { roomId: roomId });
+        throw Host.makeError("NOT_LIVE", withRoomLink("该主播当前没有可用的直播流", username), { roomId: roomId });
       }
       return [{
         cdn: "stripchat-official",

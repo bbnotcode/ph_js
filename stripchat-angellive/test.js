@@ -127,6 +127,8 @@ async function expectFailure(label, task) {
 (async () => {
   const plugin = context.LiveParsePlugin;
   assert.strictEqual(plugin.apiVersion, 1);
+  const manifest = JSON.parse(fs.readFileSync(__dirname + "/manifest.json", "utf8"));
+  const roomURL = (name) => manifest.hostBehavior.externalRoomURLTemplate.replace("{userId}", name);
   const categories = plugin.getCategories()[0].subList;
   assert.ok(categories.length >= 15, "分类数量应该覆盖官网主要分类/标签，实际 " + categories.length);
   const categoryIds = categories.map((item) => item.id);
@@ -321,6 +323,13 @@ async function expectFailure(label, task) {
     } catch (error) {
       assert.strictEqual(error.code, "NOT_LIVE", "应是 NOT_LIVE，实际 " + error.code);
       assert.ok(error.message.indexOf("门票") >= 0, "提示必须说明是门票场：" + error.message);
+      // 用户要能自己去浏览器核实「是不是真的收费」，所以提示里必须有官网地址，
+      // 而且必须和「复制直播间链接」用的是同一个模板。
+      assert.ok(error.message.indexOf(roomURL("ticket_user")) >= 0,
+        "门票场提示里必须给出可核实的官网链接：" + error.message);
+      const linked = (error.message.match(/https?:\/\/\S+/) || [])[0];
+      assert.strictEqual(linked, roomURL("ticket_user"),
+        "提示里的链接必须和 externalRoomURLTemplate 同源");
       throw error;
     }
   });
@@ -341,6 +350,8 @@ async function expectFailure(label, task) {
       await plugin.getPlayback({ roomId: "900002", userId: "gone_user" });
     } catch (error) {
       assert.ok(/已下播|没有在直播/.test(error.message), "必须说明是已下播：" + error.message);
+      assert.ok(error.message.indexOf(roomURL("gone_user")) >= 0,
+        "已下播提示也要给官网链接，方便核实：" + error.message);
       throw error;
     }
   });
@@ -359,6 +370,8 @@ async function expectFailure(label, task) {
       assert.ok(/线路暂时不稳定/.test(error.message), "要说明是线路问题：" + error.message);
       assert.ok(/不代表主播下播/.test(error.message), "必须明确不是下播：" + error.message);
       assert.ok(!/^(HTTP|Mouflon)/.test(error.message), "不能把内部文案当标题：" + error.message);
+      assert.ok(error.message.indexOf(roomURL("demo_user")) >= 0,
+        "线路抖动提示也要给官网链接，方便核实主播其实在播：" + error.message);
       throw error;
     }
   });
@@ -368,7 +381,6 @@ async function expectFailure(label, task) {
   // ---- 复制直播间链接 / 在浏览器打开 ----
   // stripchat.com 在部分网络下不可达（本机实测解析到 127.0.0.1，浏览器直接报"无法访问此网站"），
   // zh.stripchat.global 是同一个站点的中文域名，实测正常返回主播页。
-  const manifest = JSON.parse(fs.readFileSync(__dirname + "/manifest.json", "utf8"));
   const template = manifest.hostBehavior.externalRoomURLTemplate;
   assert.ok(template.indexOf("zh.stripchat.global") >= 0,
     "复制链接必须用 zh.stripchat.global（stripchat.com 在部分网络下打不开）：" + template);
