@@ -1,11 +1,14 @@
 {
   "apiVersion": 1,
-  "generatedAt": "2026-09-11T07:20:00Z",
+  "generatedAt": "2026-09-11T08:20:00Z",
   "plugins": [
     {
       "pluginId": "stripchat",
-      "version": "1.0.6",
+      "version": "1.0.7",
       "changelog": [
+        "1.0.7: 多 CDN/多 pkey 探测，区分 Mouflon 加密失败与真下播，减少误报「主播已下播」",
+        "1.0.7: getLiveState 网络失败返回 3；优先 mePlayer",
+        "1.0.7: 说明当前 Stripchat 使用 Mouflon 加密分片，原生播放器仍可能无法出画",
         "保留 Stripchat 官方签名媒体地址，不再改写到不兼容的 Grow CDN",
         "精简原生播放请求头并优先使用 AVPlayer，修复连接闪断后误报下播",
         "增加 Stripchat 官方 .media CDN 回退，修复 NSURLError -1004",
@@ -22,9 +25,9 @@
       "platformDescription": "Stripchat 公开直播源，支持分类、搜索、详情和多画质 HLS 播放。",
       "icon": "https://assets.chapturist.com/assets/icons/favicon-512x512_stripchat.global.png?v=2609fcdf",
       "zipURLs": [
-        "https://raw.githubusercontent.com/bbnotcode/ph_js/main/stripchat-angellive-1.0.6.zip"
+        "https://raw.githubusercontent.com/bbnotcode/ph_js/main/stripchat-angellive-1.0.7.zip"
       ],
-      "sha256": "0b12ee02b970e6f04ac3a997a643e996fc97dfc88fc7ad06a235ae5975370c85",
+      "sha256": "6c07abf43969632bbd083077087a464ae99eb138ff6f4f9a5ad637f2519158bc",
       "auth": {
         "required": false,
         "credentialKinds": [],
