@@ -24,6 +24,7 @@ const master = [
 
 let camRequests = 0;
 let failCam = false;
+let camOffline = false;
 let proxyAvailable = false;
 let proxyHost = "stripchat-mouflon-proxy.douyin-skip-community.workers.dev";
 const masterHosts = [];
@@ -71,7 +72,8 @@ const context = {
         if (url.includes("/api/front/v2/models/username/")) {
           camRequests += 1;
           if (failCam) throw new Error("cam endpoint unavailable");
-          return { status: 200, bodyText: JSON.stringify({ user: { user: model }, cam: { streamName: "123456" } }) };
+          const camModel = camOffline ? Object.assign({}, model, { status: "offline", isLive: false }) : model;
+          return { status: 200, bodyText: JSON.stringify({ user: { user: camModel }, cam: { streamName: "123456" } }) };
         }
         if (url.includes("/api/front/v2/models?")) {
           return { status: 200, bodyText: JSON.stringify({ blocks: [] }) };
@@ -153,6 +155,27 @@ vm.runInContext(fs.readFileSync(__dirname + "/main.js", "utf8"), context);
   assert.strictEqual(proxyRequests.length, 0, "must not probe any machine-local proxy");
   assert.ok(!directAgain[0].qualitys[0].url.includes("127.0.0.1"));
   assert.ok(!directAgain[0].qualitys[0].url.includes(".local"));
+
+  // 直播状态：cam 接口被 Stripchat 反爬拦截（实测稳定返回 HTTP 418）时，
+  // 插件绝不能报 "0"（已下播），否则宿主会把正在播放的流掐掉，
+  // 表现就是画面播着播着突然冻住不动。此处 failCam 仍为 true。
+  proxyAvailable = true;
+  const liveWhenCamBlocked = await plugin.getLiveState({ roomId: "123456", userId: "demo_user" });
+  assert.strictEqual(liveWhenCamBlocked.liveState, "1",
+    "cam 被拦截但代理能拿到清单时，必须报在播");
+
+  proxyAvailable = false;
+  const liveWhenNothing = await plugin.getLiveState({ roomId: "123456", userId: "demo_user" });
+  assert.strictEqual(liveWhenNothing.liveState, "3",
+    "cam 和代理都问不到时必须报未知 3，不能报已下播 0");
+
+  // cam 明确说不在播，但代理仍能拉到清单 -> 以代理为准，报在播（避免缓存/误判误杀）
+  proxyAvailable = true;
+  camOffline = true;
+  const liveWhenCamStale = await plugin.getLiveState({ roomId: "123456", userId: "demo_user" });
+  assert.strictEqual(liveWhenCamStale.liveState, "1",
+    "cam 说下播但代理能拉到清单时，以代理为准");
+  camOffline = false;
 
   failCam = false;
   const share = await plugin.resolveShare({ shareCode: "https://stripchat.com/demo_user" });

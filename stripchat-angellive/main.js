@@ -323,6 +323,48 @@
     throw last || Host.makeError("PROXY", "Mouflon 解密代理不可达", {});
   }
 
+  // cam 接口（/api/front/v2/models/username/<name>/cam）经常被 Stripchat 的反爬拦截，
+  // 实测会稳定返回 HTTP 418。以前只要这个接口失败，getLiveState 就直接上报 "0"，
+  // 宿主拿到 "0" 会认为主播已经下播，把正在播放的流掐掉——表现就是画面播着播着
+  // 突然冻住不动，"打开前两个直播间正常、切到第三个就开始卡"也是同一个原因
+  // （轮询下播的时机不同而已）。
+  //
+  // 现在改成：宿主说在播就直接确认；只要有任何不确定，就用云端解密代理去探真实清单
+  // （探得到 = 在播），谁都问不到时返回 "3"（未知），交给宿主的 liveStateFailureFallback
+  // 处理，绝不会把正在播的流误判成下播。
+  var LIVE_STATE_DEADLINE_MS = 6000;
+
+  async function proxyLiveStateAt(candidate, streamId) {
+    var url = candidate.base + "/play/" + encodeURIComponent(streamId) + "/index.json";
+    try {
+      var response = await Host.http.request({
+        request: { url: url, method: "GET", headers: { "Accept": "application/json" }, timeout: candidate.timeout || 5 }
+      });
+      var status = Number(response && response.status || 0);
+      if (status === 200) return "1";
+      // 代理可达但拿不到清单：4 个 CDN 域名都试过仍失败，按已下播算。
+      if (status === 404 || status === 502) return "0";
+      return "3";
+    } catch (_) {
+      // 连代理都连不上，属于"不知道"，不能当成下播。
+      return "3";
+    }
+  }
+
+  async function probeLiveViaProxy(streamId) {
+    if (!streamId) return "3";
+    var order = [];
+    if (proxyBaseCache) order.push(proxyBaseCache);
+    for (var i = 0; i < PROXY_HOSTS.length; i += 1) {
+      if (!proxyBaseCache || PROXY_HOSTS[i].base !== proxyBaseCache.base) order.push(PROXY_HOSTS[i]);
+    }
+    for (var j = 0; j < order.length; j += 1) {
+      var state = await proxyLiveStateAt(order[j], streamId);
+      if (state !== "3") return state;
+    }
+    return "3";
+  }
+
   async function qualitiesFor(streamId) {
     var cached = failureCache[streamId];
     if (cached && Date.now() - cached.at < FAIL_TTL_MS) throw cached.error;
@@ -428,10 +470,15 @@
     },
 
     getLiveState: async function (input) {
+      var roomId = String(input && input.roomId || "").trim();
+      var username = String(input && input.userId || "").trim();
       try {
-        var model = await resolveRoom(input && input.roomId, input && input.userId);
-        return { liveState: publicLive(model) ? "1" : "0" };
-      } catch (_) { return { liveState: "0" }; }
+        var model = await withDeadline(resolveRoom(roomId, username), LIVE_STATE_DEADLINE_MS,
+          "直播状态查询超过 " + Math.round(LIVE_STATE_DEADLINE_MS / 1000) + " 秒");
+        if (publicLive(model)) return { liveState: "1" };
+      } catch (_) { /* cam 被反爬拦截或超时，下面用代理判断，绝不因此报"已下播" */ }
+      // cam 明确说不在播、或 cam 根本问不到时，都以云端代理探测到的真实清单为准。
+      return { liveState: await probeLiveViaProxy(roomId || username) };
     },
 
     getPlayback: async function (input) {
