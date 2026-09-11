@@ -1,6 +1,6 @@
 {
   "apiVersion": 1,
-  "generatedAt": "2026-09-11T10:51:50Z",
+  "generatedAt": "2026-09-11T11:17:50Z",
   "plugins": [
     {
       "pluginId": "stripchat",
@@ -30,7 +30,8 @@
       "platformDescription": "Stripchat 公开直播源，支持分类、搜索、详情和多画质 HLS 播放。",
       "icon": "https://assets.chapturist.com/assets/icons/favicon-512x512_stripchat.global.png?v=2609fcdf",
       "zipURLs": [
-        "https://raw.githubusercontent.com/bbnotcode/ph_js/main/stripchat-angellive-1.0.10.zip"
+        "https://raw.githubusercontent.com/bbnotcode/ph_js/main/stripchat-angellive-1.0.10.zip",
+        "https://cdn.jsdelivr.net/gh/bbnotcode/ph_js@main/stripchat-angellive-1.0.10.zip"
       ],
       "sha256": "db15da0374f9c617d4d7e4761d7093ddb2ee2941af0baa3f88f6a3834cedb73e",
       "auth": {
