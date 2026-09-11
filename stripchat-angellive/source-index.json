@@ -1,11 +1,14 @@
 {
   "apiVersion": 1,
-  "generatedAt": "2026-09-11T11:17:50Z",
+  "generatedAt": "2026-09-11T12:40:14Z",
   "plugins": [
     {
       "pluginId": "stripchat",
-      "version": "1.0.10",
+      "version": "1.0.11",
       "changelog": [
+        "1.0.11: 修复「播一两分钟后画面卡住不动」——播放引擎限定为 avPlayer，不再回退到会把分片 URL 截断的 mePlayer",
+        "1.0.11: 去掉 lowLatency 缓冲提示，播放器不再只留 2~3 秒缓冲，网络抖动不会立刻断流",
+        "1.0.11: 分片代理地址压缩到 180 字符以内（域名压缩 + 去掉重复目录），避免被播放器截断",
         "1.0.10: 起播只发一个请求（清单请求兼作健康检查），省掉一次代理往返",
         "1.0.10: 分类标签结果缓存、搜索改为并发，列表加载更快",
         "1.0.10: 缩短本机/Bonjour 代理探测超时，避免网络慢时长时间等待",
@@ -27,13 +30,13 @@
       ],
       "platform": "stripchat",
       "platformName": "Stripchat 直播",
-      "platformDescription": "Stripchat 公开直播源，支持分类、搜索、详情和多画质 HLS 播放。",
+      "platformDescription": "Stripchat 公开直播源，支持分类、搜索、主播详情和多画质 HLS 播放。播放经本地/云端 Mouflon 解密代理还原为标准 HLS。仅限年满 18 岁的用户使用。",
       "icon": "https://assets.chapturist.com/assets/icons/favicon-512x512_stripchat.global.png?v=2609fcdf",
       "zipURLs": [
-        "https://raw.githubusercontent.com/bbnotcode/ph_js/main/stripchat-angellive-1.0.10.zip",
-        "https://cdn.jsdelivr.net/gh/bbnotcode/ph_js@main/stripchat-angellive-1.0.10.zip"
+        "https://raw.githubusercontent.com/bbnotcode/ph_js/main/stripchat-angellive-1.0.11.zip",
+        "https://cdn.jsdelivr.net/gh/bbnotcode/ph_js@main/stripchat-angellive-1.0.11.zip"
       ],
-      "sha256": "db15da0374f9c617d4d7e4761d7093ddb2ee2941af0baa3f88f6a3834cedb73e",
+      "sha256": "c176fda52ba5e1bfb0ae2b4d629177c901b844f6d7a4d8cabafe561bd19f7191",
       "auth": {
         "required": false,
         "credentialKinds": [],

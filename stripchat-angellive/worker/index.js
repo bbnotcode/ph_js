@@ -13,10 +13,20 @@ const EDGE_TLDS = ["org", "com", "net", "live"];
 const KEY_URL = "https://mouflon.chantrail.com/api/keys";
 const KEY_TTL_MS = 6 * 3600 * 1000;
 const MASTER_TTL_MS = 60 * 1000;
+const MASTER_FAIL_TTL_MS = 15 * 1000;
+const MASTER_FETCH_TIMEOUT_MS = 4500;
+const MEDIA_PLAYLIST_TTL_SECONDS = 1;
 const INDEX_TTL_SECONDS = 30;
 const SEGMENT_TTL_SECONDS = 120;
 
 const SEGMENT_RE = /_([^_]+)_(\d+(?:_part\d+)?)\.mp4(?:[?#].*)?/;
+// 上游分片永远来自这几个域名，把域名压成一位下标能省掉一大截 URL 长度。
+const SEGMENT_HOSTS = [
+  "media-hls.doppiocdn.org",
+  "media-hls.doppiocdn.com",
+  "media-hls.doppiocdn.net",
+  "media-hls.doppiocdn.live"
+];
 const ALLOWED_UPSTREAM_HOST = /(^|\.)(doppiocdn\.(org|com|live|net)|stripchat\.(com|global))$/i;
 const MOUFLON_ADVERT = /#EXT-X-MOUFLON-ADVERT/i;
 
@@ -46,6 +56,9 @@ const BUNDLED_KEYS = {
 let keyCache = { at: 0, keys: null };
 let keyInflight = null;
 const masterCache = new Map();
+// 主播没开播 / 上游整体不可用时，把失败结论短时间记住。
+// 否则播放器每次重试都要把 4 个 CDN 域名轮询一遍，客户端会一直转圈直到自己超时放弃。
+const masterFailCache = new Map();
 
 /* -------------------------------- 工具 -------------------------------- */
 
@@ -171,29 +184,45 @@ function parseMaster(bodyText, baseURL) {
   return { pkeys, variants };
 }
 
+async function probeMaster(streamId, tld, keys) {
+  const url = `https://edge-hls.doppiocdn.${tld}/hls/${streamId}/master/${streamId}_auto.m3u8`;
+  try {
+    const res = await upstreamFetch(url, MASTER_FETCH_TIMEOUT_MS);
+    if (!res.ok) return { ok: false, why: `${tld}: HTTP ${res.status}` };
+    const parsed = parseMaster(await res.text(), url);
+    if (!parsed.variants.length) return { ok: false, why: `${tld}: 无画质变体` };
+    const known = parsed.pkeys.find((pair) => keys[pair.key]);
+    if (!known) return { ok: false, why: `${tld}: master 给出的 pkey 无匹配 pdkey` };
+    return {
+      ok: true,
+      data: { streamId, scheme: known.scheme, pkey: known.key, pdkey: keys[known.key], variants: parsed.variants },
+      why: ""
+    };
+  } catch (error) {
+    return { ok: false, why: `${tld}: ${error && error.message}` };
+  }
+}
+
 async function loadMaster(streamId, env) {
   const cached = masterCache.get(streamId);
   if (cached && Date.now() - cached.at < MASTER_TTL_MS) return cached.data;
 
+  const failed = masterFailCache.get(streamId);
+  if (failed && Date.now() - failed.at < MASTER_FAIL_TTL_MS) throw new Error(failed.message);
+
   const keys = await getKeys(env);
-  const errors = [];
-  for (const tld of EDGE_TLDS) {
-    const url = `https://edge-hls.doppiocdn.${tld}/hls/${streamId}/master/${streamId}_auto.m3u8`;
-    try {
-      const res = await upstreamFetch(url, 9000);
-      if (!res.ok) { errors.push(`${tld}: HTTP ${res.status}`); continue; }
-      const parsed = parseMaster(await res.text(), url);
-      if (!parsed.variants.length) { errors.push(`${tld}: 无画质变体`); continue; }
-      const known = parsed.pkeys.find((pair) => keys[pair.key]);
-      if (!known) { errors.push(`${tld}: master 给出的 pkey 无匹配 pdkey`); continue; }
-      const data = { streamId, scheme: known.scheme, pkey: known.key, pdkey: keys[known.key], variants: parsed.variants };
-      masterCache.set(streamId, { at: Date.now(), data });
-      return data;
-    } catch (error) {
-      errors.push(`${tld}: ${error && error.message}`);
-    }
+  // 4 个 CDN 域名并发探，最坏耗时从 36s 降到单个超时。
+  const results = await Promise.all(EDGE_TLDS.map((tld) => probeMaster(streamId, tld, keys)));
+  const hit = results.find((item) => item.ok);
+  if (hit) {
+    masterCache.set(streamId, { at: Date.now(), data: hit.data });
+    masterFailCache.delete(streamId);
+    return hit.data;
   }
-  throw new Error(`无法获取 Stripchat 直播清单 (${streamId}): ${errors.join("; ")}`);
+
+  const message = `无法获取 Stripchat 直播清单 (${streamId}): ${results.map((item) => item.why).join("; ")}`;
+  masterFailCache.set(streamId, { at: Date.now(), message });
+  throw new Error(message);
 }
 
 /* ---------------------------- 播放列表改写 ---------------------------- */
@@ -203,8 +232,33 @@ function variantURL(master, variant) {
   return `${variant.url}${sep}psch=${encodeURIComponent(master.scheme)}&pkey=${encodeURIComponent(master.pkey)}`;
 }
 
+// 分片地址必须压短：Angel Live 的 mePlayer 引擎有约 190 字符的 URL 上限，
+// 超了会静默截断，u 变成非法 base64 → 400 → 连续重试后整个播放卡死。
+function compactSegmentTarget(encryptedURL) {
+  for (let i = 0; i < SEGMENT_HOSTS.length; i += 1) {
+    const prefix = `https://${SEGMENT_HOSTS[i]}`;
+    if (!encryptedURL.startsWith(prefix)) continue;
+    const rest = encryptedURL.slice(prefix.length);
+    const q = rest.indexOf("?");
+    const pathPart = q === -1 ? rest : rest.slice(0, q);
+    const query = q === -1 ? "" : rest.slice(q);
+    // 最常见的形态：/b-hls-14/277087958_533_xxx.mp4 -> "0|14|277087958_533_xxx.mp4"
+    const plain = /^\/b-hls-(\d+)\/(.+)$/.exec(pathPart);
+    if (plain) {
+      // 目录里还有一层和文件名重复的 streamId：277087958/277087958_2164_xxx.mp4
+      const file = plain[2].replace(/^(\d+)\/(\1_)/, "$2");
+      return `${i}|${plain[1]}|${file}${query}`;
+    }
+    // 兜底：压掉目录里和文件名重复的那段 streamId
+    const deduped = pathPart.replace(/^(\/[^/]+\/)(\d+)\/(\2_)/, "$1$3");
+    return `${i}${deduped}${query}`;
+  }
+  return null;
+}
+
 function proxySegmentPath(encryptedURL, pkey) {
-  const encoded = base64url(encryptedURL);
+  const compact = compactSegmentTarget(encryptedURL);
+  const encoded = base64url(compact === null ? encryptedURL : compact);
   return `/seg/segment.mp4?u=${encoded}&k=${encodeURIComponent(pkey)}`;
 }
 
@@ -215,6 +269,37 @@ function base64url(str) {
 function unb64url(str) {
   const padded = str.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - (str.length % 4)) % 4);
   return atob(padded);
+}
+
+// 不同客户端/旧版本插件生成的分片地址编码方式并不统一：
+// 标准 base64 里的 "+" 在 query 里会被解析成空格，个别版本还会直接传明文 URL。
+// 这里统一容错，避免播放器拿到 400 之后陷入重试风暴。
+function decodeSegmentParam(raw) {
+  const value = String(raw || "");
+  if (!value) return null;
+  const attempts = [value];
+  if (value.includes(" ")) attempts.push(value.replace(/ /g, "+"));
+  for (const candidate of attempts) {
+    let url = null;
+    try { url = unb64url(candidate); } catch (_) { url = null; }
+    if (url) {
+      if (/^https:\/\//i.test(url)) return url;
+      const packed = /^([0-3])\|(\d+)\|(.+)$/.exec(url);
+      if (packed) {
+        // 文件名开头就是 streamId，补回被压掉的那层目录。
+        const sid = /^(\d+)_/.exec(packed[3]);
+        const dir = sid ? `${sid[1]}/` : "";
+        return `https://${SEGMENT_HOSTS[Number(packed[1])]}/b-hls-${packed[2]}/${dir}${packed[3]}`;
+      }
+      const compact = /^([0-3])(\/.*)$/.exec(url);
+      if (compact) return `https://${SEGMENT_HOSTS[Number(compact[1])]}${compact[2]}`;
+    }
+  }
+  try {
+    const plain = decodeURIComponent(value);
+    if (/^https:\/\//i.test(plain)) return plain;
+  } catch (_) { /* give up */ }
+  return null;
 }
 
 function rewriteMediaPlaylist(bodyText, baseURL, pkey) {
@@ -262,24 +347,31 @@ function alternateHosts(url) {
   return list;
 }
 
+async function tryVariantCandidate(candidate, attempts) {
+  try {
+    const res = await upstreamFetch(candidate, 6000);
+    const body = res.ok ? await res.text() : "";
+    const decoy = MOUFLON_ADVERT.test(body);
+    if (res.ok && !decoy) return { ok: true, body, url: candidate };
+    attempts.push(`${new URL(candidate).host} -> ${res.status}${decoy ? " (广告诱饵清单)" : ""}`);
+  } catch (error) {
+    attempts.push(`${new URL(candidate).host} -> ${error && error.message}`);
+  }
+  return { ok: false };
+}
+
 async function fetchVariantPlaylist(master, variant, env) {
   const attempts = [];
-  for (let round = 0; round < 2; round += 1) {
-    for (const candidate of alternateHosts(variantURL(master, variant))) {
-      try {
-        const res = await upstreamFetch(candidate, 10000);
-        const body = res.ok ? await res.text() : "";
-        if (res.ok && !MOUFLON_ADVERT.test(body)) return { ok: true, body, url: candidate };
-        attempts.push(`${new URL(candidate).host} -> ${res.status}${MOUFLON_ADVERT.test(body) ? " (广告诱饵清单)" : ""}`);
-      } catch (error) {
-        attempts.push(`${new URL(candidate).host} -> ${error && error.message}`);
-      }
-    }
-    if (round === 0) {
-      masterCache.delete(master.streamId);
-      await new Promise((resolve) => setTimeout(resolve, 400));
-    }
-  }
+  // 第一轮并发探所有 CDN 域名：最常见的情况是第一个就命中，最坏也只有一个超时周期。
+  const first = await Promise.all(alternateHosts(variantURL(master, variant)).map((candidate) => tryVariantCandidate(candidate, attempts)));
+  const hit = first.find((item) => item.ok);
+  if (hit) return hit;
+
+  masterCache.delete(master.streamId);
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  const second = await Promise.all(alternateHosts(variantURL(master, variant)).map((candidate) => tryVariantCandidate(candidate, attempts)));
+  const retry = second.find((item) => item.ok);
+  if (retry) return retry;
   return { ok: false, attempts };
 }
 
@@ -328,7 +420,16 @@ async function handleMasterPlaylist(streamId, env) {
   return text(lines.join("\n") + "\n", 200, "application/vnd.apple.mpegurl");
 }
 
-async function handleVariantPlaylist(streamId, name, env) {
+async function handleVariantPlaylist(streamId, name, env, ctx, request) {
+  const origin = new URL(request.url).origin;
+  const cache = typeof caches !== "undefined" ? caches.default : null;
+  const cacheKey = new Request(`${origin}/play/${encodeURIComponent(streamId)}/${encodeURIComponent(name)}.m3u8`, { method: "GET" });
+  if (cache) {
+    try {
+      const hit = await cache.match(cacheKey);
+      if (hit) return hit;
+    } catch (_) { /* 缓存不可用就走回源 */ }
+  }
   const master = await loadMaster(streamId, env);
   const variant = master.variants.find((item) => item.name === name) ||
     master.variants.find((item) => item.name.toLowerCase() === String(name).toLowerCase());
@@ -342,7 +443,18 @@ async function handleVariantPlaylist(streamId, name, env) {
   }
   const rewritten = rewriteMediaPlaylist(outcome.body, outcome.url, master.pkey);
   if (!rewritten.segmentCount) return text("上游清单里没有可解密的 Mouflon 分片", 502);
-  return text(rewritten.playlist, 200, "application/vnd.apple.mpegurl");
+  const response = new Response(rewritten.playlist, {
+    status: 200,
+    headers: {
+      "Content-Type": "application/vnd.apple.mpegurl",
+      "Cache-Control": `public, max-age=${MEDIA_PLAYLIST_TTL_SECONDS}`,
+      "Access-Control-Allow-Origin": "*"
+    }
+  });
+  if (cache && ctx && typeof ctx.waitUntil === "function") {
+    ctx.waitUntil(cache.put(cacheKey, response.clone()).catch(() => {}));
+  }
+  return response;
 }
 
 async function handleSegment(url, env, ctx) {
@@ -361,9 +473,27 @@ async function handleSegment(url, env, ctx) {
     } catch (_) { /* 缓存不可用就走回源 */ }
   }
 
-  let encryptedURL;
-  try { encryptedURL = unb64url(raw); } catch (_) { return text("bad u", 400); }
-  if (!/^https:\/\//i.test(encryptedURL)) return text("bad u", 400);
+  const rawValue = String(raw || "");
+  // 正常 base64 长度一定是 4 的倍数（去掉 = 填充后是 4k / 4k+2 / 4k+3）。
+  // 只要出现 4k+1，就说明客户端把 URL 截断了，这是 mePlayer 引擎的典型症状。
+  if (rawValue.length % 4 === 1) {
+    console.log("seg-truncated", "len=" + rawValue.length,
+      "head=" + JSON.stringify(rawValue.slice(0, 24)), "tail=" + JSON.stringify(rawValue.slice(-16)));
+  }
+  const encryptedURL = decodeSegmentParam(raw);
+  if (!encryptedURL) {
+    const value = String(raw || "");
+    const padded = value.replace(/-/g, "+").replace(/_/g, "/").replace(/ /g, "+")
+      + "=".repeat((4 - (value.length % 4)) % 4);
+    let detail = "";
+    try {
+      detail = "atob=" + JSON.stringify(atob(padded).slice(0, 160));
+    } catch (error) {
+      detail = "atobErr=" + (error && error.message);
+    }
+    console.log("seg-bad-u", "len=" + value.length, "mod4=" + (value.length % 4), detail, "raw=" + JSON.stringify(value.slice(0, 400)));
+    return text("bad u", 400);
+  }
 
   let hostname = "";
   try { hostname = new URL(encryptedURL).hostname; } catch (_) { return text("bad u", 400); }
@@ -490,10 +620,18 @@ export default {
       const sub = pathname.match(/^\/sub\/([^/]+)$/);
       if (sub) return await handleSubscription(request, sub[1], env, ctx);
       if (pathname === "/seg" || /^\/seg\/[^/]*\.mp4$/.test(pathname)) return await handleSegment(url, env, ctx);
+      const rawPlaylist = pathname.match(/^\/raw\/([^/]+)\/([^/]+)\.m3u8$/);
+      if (rawPlaylist) {
+        const master = await loadMaster(rawPlaylist[1], env);
+        const variant = master.variants.find((item) => item.name === rawPlaylist[2]) || master.variants[0];
+        const outcome = await fetchVariantPlaylist(master, variant, env);
+        if (!outcome.ok) return text(outcome.attempts.join("\n"), 502);
+        return text(outcome.body, 200, "application/vnd.apple.mpegurl");
+      }
 
       const play = pathname.match(/^\/play\/([^/]+?)(?:\/([^/]+))?\.m3u8$/);
       if (play) {
-        return play[2] ? await handleVariantPlaylist(play[1], play[2], env) : await handleMasterPlaylist(play[1], env);
+        return play[2] ? await handleVariantPlaylist(play[1], play[2], env, ctx, request) : await handleMasterPlaylist(play[1], env);
       }
       const index = pathname.match(/^\/play\/([^/]+)\/index\.json$/);
       if (index) return await handleIndex(request, index[1], env, ctx);

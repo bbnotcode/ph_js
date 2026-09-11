@@ -420,10 +420,13 @@
             userAgent: UA,
             headers: quality.local ? localHeaders() : playbackHeaders(),
             requestContext: { roomId: roomId, userId: username },
+            // avPlayer 是唯一稳定跑通的引擎：它用 HTTP/2、按原样请求分片地址。
+            // mePlayer 会把分片 URL 截断（约 190 字符上限），拿不到 u 参数就一路 400，
+            // 重试 8 次后整个播放线程卡死，表现就是"播一两分钟后画面卡住不动"。
+            // 同时不要声明 lowLatency：低延迟模式只留 2~3 秒缓冲，任何抖动都会直接断流。
             playbackHints: {
               streamFormat: "hlsLive",
-              latencyMode: "lowLatency",
-              preferredEngines: ["avPlayer", "mePlayer"],
+              preferredEngines: ["avPlayer"],
               isLive: true,
               requiresCustomSegmentLoader: false,
               selectionBehavior: "direct"

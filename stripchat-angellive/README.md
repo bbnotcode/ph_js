@@ -7,9 +7,32 @@ AngelLive API v1 插件，仅枚举和播放 Stripchat `public` 状态的直播�
 - `manifest.json`：AngelLive 插件清单。
 - `main.js`：分类、房间、搜索、详情、状态和 HLS 播放实现。
 - `test.js`：`node test.js` 运行契约测试（含代理路径与直连回退路径）。
-- `stripchat-angellive-1.0.10.zip`：可安装插件包，包含 AngelLive 列表和首页平台卡片图标。
+- `stripchat-angellive-1.0.11.zip`：可安装插件包，包含 AngelLive 列表和首页平台卡片图标。
 - `worker/`：Cloudflare Worker 版解密代理源码。
 - `source-index.json`：AngelLive 订阅源索引。
+
+## 播放引擎：只允许 avPlayer
+
+AngelLive 有两个播放引擎：`avPlayer`（系统播放器）和 `mePlayer`（内置播放器）。
+两者对同一份清单的表现完全不同，同一台设备同一时段的抓包对比：
+
+| 引擎 | 协议 | 特征请求头 | 结果 |
+| --- | --- | --- | --- |
+| avPlayer | HTTP/2 | `x-playback-session-id` | 40 个分片全部 200 |
+| mePlayer | HTTP/1.1 | `icy-metadata: 1`、`range: bytes=0-`、UA 重复两遍 | 8 个请求全部 400 |
+
+原因：**mePlayer 会把分片 URL 截断在约 190 字符**（`u` 参数从 136 字符被砍成 109 字符，
+base64 长度变成非法的 4k+1）。播放器拿不到分片就每秒重试一次，重试 8 次后整个播放线程
+放弃，表现就是「前一两分钟很流畅，之后画面卡住不动」。
+
+因此这一版做了三件事：
+
+- `playbackHints.preferredEngines` 固定为 `["avPlayer"]`，不给回退到 mePlayer 的机会；
+- 不再声明 `latencyMode: "lowLatency"`：低延迟模式只留 2~3 秒缓冲，任何抖动都直接断流；
+- Worker 侧把分片地址从 236 字符压到 **179 字符**（域名压成一位下标 + 去掉重复的
+  `/<streamId>/` 目录层），即使被降级到 mePlayer 也不会超过它的上限。
+
+三种编码格式 Worker 都兼容，设备上残留的旧清单不会 404。
 
 ## 播放：经 Mouflon 解密代理
 
@@ -42,7 +65,7 @@ curl -s https://stripchat-mouflon-proxy.douyin-skip-community.workers.dev/health
 
 ## 订阅
 
-把 `source-index.json` 和 `stripchat-angellive-1.0.10.zip` 一起上传到 `bbnotcode/ph_js` 的 `main`
+把 `source-index.json` 和 `stripchat-angellive-1.0.11.zip` 一起上传到 `bbnotcode/ph_js` 的 `main`
 分支根目录，然后在 AngelLive 中添加订阅地址：
 
 ```text

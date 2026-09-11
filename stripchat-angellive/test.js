@@ -125,7 +125,9 @@ vm.runInContext(fs.readFileSync(__dirname + "/main.js", "utf8"), context);
   assert.ok(!playback[0].qualitys[0].url.includes("growcdnssedge.com"));
   assert.ok(playback[0].qualitys[0].url.includes("pkey=test-pkey"));
   assert.strictEqual(playback[0].displayName, "Stripchat 官方线路");
-  assert.strictEqual(JSON.stringify(playback[0].qualitys[0].playbackHints.preferredEngines), '["avPlayer","mePlayer"]');
+  // mePlayer 会把分片 URL 截断导致 400 卡死，只允许 avPlayer。
+  assert.strictEqual(JSON.stringify(playback[0].qualitys[0].playbackHints.preferredEngines), '["avPlayer"]');
+  assert.strictEqual(playback[0].qualitys[0].playbackHints.latencyMode, undefined);
   assert.strictEqual(playback[0].qualitys[0].headers.Origin, undefined);
   assert.strictEqual(playback[0].qualitys[0].headers.Referer, undefined);
 
