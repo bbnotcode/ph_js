@@ -29,6 +29,7 @@ let proxyAvailable = false;
 let proxyHost = "stripchat-mouflon-proxy.douyin-skip-community.workers.dev";
 const masterHosts = [];
 const proxyRequests = [];
+const modelRequests = [];
 
 const context = {
   console,
@@ -79,6 +80,7 @@ const context = {
           return { status: 200, bodyText: JSON.stringify({ blocks: [] }) };
         }
         if (url.includes("/api/front/models?")) {
+          modelRequests.push(url);
           return { status: 200, bodyText: JSON.stringify({ models: [model] }) };
         }
         if (url.includes("_auto.m3u8")) {
@@ -101,7 +103,26 @@ vm.runInContext(fs.readFileSync(__dirname + "/main.js", "utf8"), context);
 (async () => {
   const plugin = context.LiveParsePlugin;
   assert.strictEqual(plugin.apiVersion, 1);
-  assert.ok(plugin.getCategories()[0].subList.length >= 3);
+  const categories = plugin.getCategories()[0].subList;
+  assert.ok(categories.length >= 15, "分类数量应该覆盖官网主要分类/标签，实际 " + categories.length);
+  const categoryIds = categories.map((item) => item.id);
+  assert.ok(categoryIds.indexOf("girls/asian") >= 0, "必须保留亚洲分类");
+  assert.strictEqual(new Set(categoryIds).size, categoryIds.length, "分类 id 不能重复");
+
+  // 标签分类必须真的带 filterGroupTags，否则点进去看到的是全部女主播。
+  modelRequests.length = 0;
+  await plugin.getRooms({ id: "girls/asian", page: 1 });
+  assert.strictEqual(modelRequests.length, 1);
+  assert.ok(modelRequests[0].includes("primaryTag=girls"), "标签分类仍要带主分类");
+  assert.ok(
+    modelRequests[0].includes("filterGroupTags=" + encodeURIComponent(JSON.stringify([["ethnicityAsian"]]))),
+    "亚洲分类必须真的用 ethnicityAsian 过滤：" + modelRequests[0]
+  );
+
+  // 纯主分类不能被塞进标签过滤
+  modelRequests.length = 0;
+  await plugin.getRooms({ id: "couples", page: 1 });
+  assert.ok(!modelRequests[0].includes("filterGroupTags"), "主分类不应带标签过滤");
 
   const rooms = await plugin.getRooms({ id: "girls", page: 1 });
   assert.strictEqual(rooms.length, 1);

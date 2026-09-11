@@ -61,13 +61,65 @@
     });
   }
 
+  // Stripchat 官网的分类是两层结构：
+  //   主分类 primaryTag = girls / couples / men / trans
+  //   子标签 filterGroupTags = 官网筛选面板里的标签 key
+  //
+  // 之前只硬编码了 5 个入口，而且靠解析列表接口返回的 blocks 去反查标签 id，
+  // 但 /api/front/v2/models 的 blocks 里根本没有 asian 这类标签，
+  // 查不到就退化成整个 girls 分类 —— 点「亚洲女主播」看到的其实是全部女主播。
+  // 现在直接使用官网筛选面板的标签 key（已逐个实测能真正过滤），分类数量也从 5 个扩到 22 个。
   var CATEGORIES = [
     { id: "girls", title: "女主播", icon: "person.crop.circle", tag: "girls" },
-    { id: "girls/new", title: "最新女主播", icon: "sparkles", tag: "girls/new" },
-    { id: "girls/asian", title: "亚洲女主播", icon: "globe.asia.australia", tag: "girls/asian" },
+    { id: "girls/new", title: "新主播", icon: "sparkles", tag: "girls/new" },
+    { id: "girls/asian", title: "亚洲", icon: "globe.asia.australia", tag: "girls/asian" },
+    { id: "girls/chinese", title: "中文主播", icon: "globe.asia.australia", tag: "girls/chinese" },
+    { id: "girls/japanese", title: "日本", icon: "globe.asia.australia", tag: "girls/japanese" },
+    { id: "girls/korean", title: "韩国", icon: "globe.asia.australia", tag: "girls/korean" },
+    { id: "girls/ebony", title: "黑人", icon: "globe", tag: "girls/ebony" },
+    { id: "girls/latina", title: "拉丁", icon: "globe.americas", tag: "girls/latina" },
+    { id: "girls/mixed", title: "混血", icon: "globe", tag: "girls/mixed" },
+    { id: "girls/vr", title: "VR 直播", icon: "visionpro", tag: "girls/vr" },
+    { id: "girls/teen", title: "18+ 少女", icon: "sparkles", tag: "girls/teen" },
+    { id: "girls/young", title: "青春 22+", icon: "sparkles", tag: "girls/young" },
+    { id: "girls/toy", title: "互动玩具", icon: "gamecontroller", tag: "girls/toy" },
+    { id: "girls/squirt", title: "潮吹", icon: "drop", tag: "girls/squirt" },
+    { id: "girls/masturbation", title: "自慰", icon: "hand.raised", tag: "girls/masturbation" },
+    { id: "girls/feet", title: "恋足", icon: "figure.walk", tag: "girls/feet" },
+    { id: "girls/anal", title: "肛交", icon: "person.crop.circle", tag: "girls/anal" },
+    { id: "girls/cosplay", title: "Cosplay", icon: "theatermasks", tag: "girls/cosplay" },
+    { id: "girls/student", title: "学生", icon: "graduationcap", tag: "girls/student" },
     { id: "couples", title: "情侣直播", icon: "person.2", tag: "couples" },
-    { id: "men", title: "男主播", icon: "person.crop.circle", tag: "men" }
+    { id: "men", title: "男主播", icon: "person.crop.circle", tag: "men" },
+    { id: "men/gays", title: "男男", icon: "person.2", tag: "men/gays" },
+    { id: "men/straight", title: "直男", icon: "person.crop.circle", tag: "men/straight" },
+    { id: "trans", title: "跨性别", icon: "person.crop.circle.badge.checkmark", tag: "trans" }
   ];
+
+  // 分类 id -> Stripchat 官网筛选面板的标签 key。
+  // 没有条目的（girls / couples / men / trans）就是纯主分类，不带标签过滤。
+  var TAG_KEYS = {
+    "girls/new": "autoTagNew",
+    "girls/asian": "ethnicityAsian",
+    "girls/chinese": "tagLanguageChinese",
+    "girls/japanese": "tagLanguageJapanese",
+    "girls/korean": "tagLanguageKorean",
+    "girls/ebony": "ethnicityEbony",
+    "girls/latina": "ethnicityLatino",
+    "girls/mixed": "ethnicityMultiracial",
+    "girls/vr": "autoTagVr",
+    "girls/teen": "ageTeen",
+    "girls/young": "ageYoung",
+    "girls/toy": "autoTagInteractiveToy",
+    "girls/squirt": "doSquirt",
+    "girls/masturbation": "doMasturbation",
+    "girls/feet": "doFootFetish",
+    "girls/anal": "doAnal",
+    "girls/cosplay": "doCosplay",
+    "girls/student": "subcultureStudent",
+    "men/gays": "sexGayCouples",
+    "men/straight": "orientationStraight"
+  };
 
   function headers(accept) {
     return {
@@ -172,29 +224,11 @@
     return ["girls", "couples", "men", "trans"].indexOf(value) >= 0 ? value : "girls";
   }
 
-  var tagKeyCache = {};
-
-  async function tagKey(tag) {
-    if (String(tag).indexOf("/") < 0) return "";
-    if (tagKeyCache[tag]) return tagKeyCache[tag];
-    var path = "/api/front/v2/models?primaryTag=" + encodeURIComponent(primaryTag(tag))
-      + "&limit=24&topLimit=61&favoritesLimit=24&msBlock=true&removeShows=true&nic=true&uniq=" + Date.now().toString(36);
-    var blocks = payload(await currentAPI(path, 20)).blocks || [];
-    for (var i = 0; i < blocks.length; i += 1) {
-      if (String(blocks[i] && blocks[i].url || "") === String(tag)) {
-        var id = String(blocks[i].tagId || "");
-        var key = id.indexOf(".") >= 0 ? id.split(".").pop() : id;
-        if (key) tagKeyCache[tag] = key;
-        return key;
-      }
-    }
-    return "";
+  function categoryTagKey(tag) {
+    return TAG_KEYS[String(tag || "")] || "";
   }
 
-  async function fetchModels(tag, page) {
-    page = Math.max(1, Number(page) || 1);
-    var offset = (page - 1) * PAGE_SIZE;
-    var key = await tagKey(tag);
+  async function requestModels(tag, key, offset) {
     var parts = [
       "removeShows=true", "recInFeatured=false", "limit=" + PAGE_SIZE, "offset=" + offset,
       "primaryTag=" + encodeURIComponent(primaryTag(tag)), "sortBy=stripRanking", "userRole=user",
@@ -205,10 +239,21 @@
       parts.push("filterGroupTags=" + encodeURIComponent(JSON.stringify([[key]])));
       parts.push("parentTag=" + encodeURIComponent(key));
     }
-    parts.push("uniq=" + Date.now().toString(36));
+    parts.push("uniq=" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6));
     var root = payload(await currentAPI("/api/front/models?" + parts.join("&"), 20));
     var models = root.models || root.items || root.users || root.results || [];
     return models.map(normalizeModel).filter(publicLive);
+  }
+
+  async function fetchModels(tag, page) {
+    page = Math.max(1, Number(page) || 1);
+    var offset = (page - 1) * PAGE_SIZE;
+    var key = categoryTagKey(tag);
+    var models = await requestModels(tag, key, offset);
+    // 带标签的分类偶尔会返回空列表（Stripchat 标签接口抖动 / 反爬），
+    // 空结果重试一次，避免用户看到"这个分类没人直播"的假象。
+    if (key && !models.length) models = await requestModels(tag, key, offset);
+    return models;
   }
 
   function currentCam(value, username) {

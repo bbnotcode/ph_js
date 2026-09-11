@@ -302,12 +302,34 @@ function decodeSegmentParam(raw) {
   return null;
 }
 
-function rewriteMediaPlaylist(bodyText, baseURL, pkey) {
+// 分片地址有两种输出方式：
+//   direct —— 直接把解密后的真实 CDN 地址写进清单，播放器自己直连 CDN。
+//             视频字节完全不过 Cloudflare，走的是和网页版完全一样的链路。
+//   proxy  —— 旧行为，分片也经 Worker 中转（会多绕一跳，且上游曾对 Cloudflare
+//             出口返回 403）。保留它是为了出问题时能一键回退。
+function segmentMode(env) {
+  const mode = String((env && env.SEGMENT_MODE) || "direct").toLowerCase();
+  return mode === "proxy" ? "proxy" : "direct";
+}
+
+async function rewriteMediaPlaylist(bodyText, baseURL, pkey, pdkey, mode) {
+  const direct = mode !== "proxy";
   const lines = bodyText.replace(/\r/g, "").split("\n");
   const out = [];
   let count = 0;
   let pendingEncrypted = null;
   let sawParts = false;
+
+  // 直连模式下解不开的分片一律退回代理，绝不产出播放器拿不到的地址。
+  const segmentTarget = async (absolute) => {
+    if (direct) {
+      try {
+        const real = await decryptSegmentURL(absolute, pdkey);
+        if (real) return real;
+      } catch (_) { /* 解不开就走代理 */ }
+    }
+    return proxySegmentPath(absolute, pkey);
+  };
 
   for (const rawLine of lines) {
     const line = rawLine.trim();
@@ -320,7 +342,10 @@ function rewriteMediaPlaylist(bodyText, baseURL, pkey) {
 
     if (line.startsWith("#EXT-X-MAP:")) {
       const match = line.match(/URI="([^"]+)"/);
-      out.push(match ? line.replace(match[1], proxySegmentPath(new URL(match[1], baseURL).toString(), pkey)) : line);
+      if (!match) { out.push(line); continue; }
+      const absolute = new URL(match[1], baseURL).toString();
+      // init 段文件名没有加密，直连模式直接用原地址。
+      out.push(line.replace(match[1], direct ? absolute : proxySegmentPath(absolute, pkey)));
       continue;
     }
     if (line[0] === "#") { out.push(line); continue; }
@@ -329,7 +354,7 @@ function rewriteMediaPlaylist(bodyText, baseURL, pkey) {
       const absolute = /^https?:\/\//i.test(pendingEncrypted) ? pendingEncrypted
         : pendingEncrypted.startsWith("//") ? "https:" + pendingEncrypted
           : new URL(pendingEncrypted, baseURL).toString();
-      out.push(proxySegmentPath(absolute, pkey));
+      out.push(await segmentTarget(absolute));
       count += 1;
       pendingEncrypted = null;
     }
@@ -441,7 +466,7 @@ async function handleVariantPlaylist(streamId, name, env, ctx, request) {
       "上游媒体清单不可用（已重试多个 CDN 节点）：\n" + outcome.attempts.join("\n") +
       "\n\n403/302 通常是该 CDN 节点暂时不可用或对本出口限流，换一个主播或过几分钟再试。", 502);
   }
-  const rewritten = rewriteMediaPlaylist(outcome.body, outcome.url, master.pkey);
+  const rewritten = await rewriteMediaPlaylist(outcome.body, outcome.url, master.pkey, master.pdkey, segmentMode(env));
   if (!rewritten.segmentCount) return text("上游清单里没有可解密的 Mouflon 分片", 502);
   const response = new Response(rewritten.playlist, {
     status: 200,

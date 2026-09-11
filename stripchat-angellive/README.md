@@ -7,7 +7,7 @@ AngelLive API v1 插件，仅枚举和播放 Stripchat `public` 状态的直播�
 - `manifest.json`：AngelLive 插件清单。
 - `main.js`：分类、房间、搜索、详情、状态和 HLS 播放实现。
 - `test.js`：`node test.js` 运行契约测试（含代理路径与直连回退路径）。
-- `stripchat-angellive-1.0.14.zip`：可安装插件包，包含 AngelLive 列表和首页平台卡片图标。
+- `stripchat-angellive-1.0.15.zip`：可安装插件包，包含 AngelLive 列表和首页平台卡片图标。
 - `worker/`：Cloudflare Worker 版解密代理源码。
 - `source-index.json`：AngelLive 订阅源索引。
 
@@ -51,7 +51,26 @@ base64 长度变成非法的 4k+1）。播放器拿不到分片就每秒重试�
 
 三种编码格式 Worker 都兼容，设备上残留的旧清单不会 404。
 
-## 播放：经 Mouflon 解密代理
+## 分类：主分类 + 官网标签
+
+Stripchat 官网的分类是两层结构：
+
+- 主分类 `primaryTag` = `girls` / `couples` / `men` / `trans`
+- 子标签 `filterGroupTags` = 官网筛选面板里的标签 key（`ethnicityAsian`、`tagLanguageJapanese`、`doSquirt` …）
+
+1.0.15 之前只有 5 个写死的入口，而且靠解析 `/api/front/v2/models` 返回的 `blocks`
+反查标签 id。实测那份 `blocks` 里根本没有 asian 这类标签，查不到就静默退化成整个
+`girls` 分类——所以点「亚洲女主播」看到的是全部女主播。
+
+现在 `main.js` 里维护两张表：
+
+- `CATEGORIES`：展示用分类列表，1.0.15 从 5 个扩到 22 个；
+- `TAG_KEYS`：分类 id → 官网标签 key 的映射，直接用于 `filterGroupTags`。
+
+标签接口偶尔会返回空列表（Stripchat 抖动 / 反爬），带标签的分类遇到空结果会
+自动重试一次，避免用户看到「这个分类没人直播」的假象。
+
+## 播放：清单经代理，分片直连官方 CDN
 
 Stripchat 的 HLS 现在启用了 **Mouflon v2** 保护，宿主播放器无法直接播放：
 
@@ -74,9 +93,26 @@ var PROXY_HOSTS = [
 
 云端 Worker 不可用时会回退到旧的直连逻辑（此时通常播不出来），不会再去找机器本地进程。
 
+### 视频不再经过 Cloudflare（1.0.15 关键改动）
+
+分片文件名 `＜streamId＞_＜序号＞_＜加密token＞_＜时间戳＞.mp4` 里只有中间那段 token 是加密的，
+streamId / 序号 / 时间戳都是明文。解密后得到的就是可以直接下载的真实 CDN 地址，
+实测不挑请求头（带 UA、带 Referer、完全不带头或用 `AppleCoreMedia` UA 都是 200）。
+
+所以 Worker 现在默认 `SEGMENT_MODE=direct`：清单里直接输出解密后的真实 CDN 地址，
+播放器拉视频**直连 Stripchat 官方 CDN**，Cloudflare 只负责那几 KB 的清单。
+这和「直接在官网看」走的是同一条链路，速度自然一致。
+
+- 实测对比：分片经 Worker 中转 3.7~4.4 秒，直连 CDN 3.3~4.1 秒，且少一跳；
+- 上游 CDN 曾对 Cloudflare 出口返回 403（`media-hls.doppiocdn.com/net`），说明中转本身不稳；
+- 解不开的分片会自动退回 Worker 中转，绝不会给出播放器拿不到的地址；
+- `EXT-X-MAP`（init 段，文件名未加密）在 direct 模式下直接用原地址。
+
+想一键回退成旧的中转模式：给 Worker 设置 `SEGMENT_MODE=proxy` 再部署即可。
+
 ## 订阅
 
-把 `source-index.json` 和 `stripchat-angellive-1.0.14.zip` 一起上传到 `bbnotcode/ph_js` 的 `main`
+把 `source-index.json` 和 `stripchat-angellive-1.0.15.zip` 一起上传到 `bbnotcode/ph_js` 的 `main`
 分支根目录，然后在 AngelLive 中添加订阅地址：
 
 ```text
