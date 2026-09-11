@@ -7,7 +7,7 @@ AngelLive API v1 插件，仅枚举和播放 Stripchat `public` 状态的直播�
 - `manifest.json`：AngelLive 插件清单。
 - `main.js`：分类、房间、搜索、详情、状态和 HLS 播放实现。
 - `test.js`：`node test.js` 运行契约测试（含代理路径与直连回退路径）。
-- `stripchat-angellive-1.0.16.zip`：可安装插件包，包含 AngelLive 列表和首页平台卡片图标。
+- `stripchat-angellive-1.0.17.zip`：可安装插件包，包含 AngelLive 列表和首页平台卡片图标。
 - `worker/`：Cloudflare Worker 版解密代理源码。
 - `source-index.json`：AngelLive 订阅源索引。
 
@@ -110,6 +110,30 @@ streamId / 序号 / 时间戳都是明文。解密后得到的就是可以直接
 
 想一键回退成旧的中转模式：给 Worker 设置 `SEGMENT_MODE=proxy` 再部署即可。
 
+## 图标与封面（1.0.17 修正）
+
+AngelLive 对图标的渲染方式是固定的，插件只能适配：
+
+| 文件 | 使用位置 | AngelLive 的渲染方式 |
+| --- | --- | --- |
+| `assets/tv_<pluginId>_big[_dark].png` | tvOS / iOS 平台卡片 | tvOS：`resizable().frame(370×222)`，**硬拉伸**；iOS：`aspectRatio(.fit).frame(maxHeight: 80)` |
+| `assets/tv_<pluginId>_small[_dark].png` | tvOS 聚焦浮层 | 同 370×222，下方叠一段主播简介 |
+| `assets/live_card_<pluginId>.png` | iOS tab / 列表 | 按最长边归一到 25pt |
+| `assets/pad_live_card_<pluginId>.png` | iOS 插件管理列表 | 原始尺寸 |
+| `assets/mini_live_card_<pluginId>.png` | macOS 侧边栏 | 强制按 16pt 渲染 |
+
+关键点：**tvOS 不会保持图标比例**。370×222 是 5:3，
+所以 `tv_*_big` / `tv_*_small` 必须本身就是 5:3 画布（本插件用 1000×600），
+图标画在画布里保持自然比例，这样被拉伸到 370×222 时才是等比缩放。
+1.0.16 及之前给的是 512×512 方图，被横向拉扁 1.67 倍，圆形气泡变成扁椭圆。
+
+颜色：浅色版 `#903232`（favicon 里图标本身的颜色），
+深色版 `#fa5365`（官网品牌强调色），两者是不同文件。
+
+房间封面：官网列表接口只给 `-thumb-small`（200×150），
+把后缀换成 `-thumb-big` 即 400×300（单张 ~25KB）；
+详情页用 `-full` 即 1000×750。实测 29/29 个在播房间两档均为 200。
+
 ## 「点进去就卡」的两个真实成因（1.0.16 修复）
 
 **一、回退到了播不了的地址。** 早先云端代理失败时会回退到「上游 master + pkey」。
@@ -130,14 +154,14 @@ streamId / 序号 / 时间戳都是明文。解密后得到的就是可以直接
 
 ## 订阅
 
-把 `source-index.json` 和 `stripchat-angellive-1.0.16.zip` 一起上传到 `bbnotcode/ph_js` 的 `main`
+把 `source-index.json` 和 `stripchat-angellive-1.0.17.zip` 一起上传到 `bbnotcode/ph_js` 的 `main`
 分支根目录，然后在 AngelLive 中添加订阅地址：
 
 ```text
 https://stripchat-mouflon-proxy.douyin-skip-community.workers.dev/sub/source-index.json
 ```
 
-订阅列表图标使用 Stripchat 官网声明的 512×512 PNG 应用图标。
+订阅列表图标取自 Stripchat 官网 favicon 的图形本身（见下一节）。
 
 **推荐用上面这条 Worker 地址**：它由云端 Worker 回源拉取订阅，并在返回的
 `zipURLs` 里把插件包也改写成走 Worker，所以设备全程只依赖 Cloudflare——

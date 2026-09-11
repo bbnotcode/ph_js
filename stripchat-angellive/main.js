@@ -181,16 +181,37 @@
     return (!status || status === "public") && model.isLive !== false && model.isOnline !== false;
   }
 
+  // /api/front/v2/* 返回的是相对路径（/previews/... 、/avatars/...），
+  // /api/front/models 返回的是绝对路径。两种都要能用。
+  var IMAGE_BASE = "https://static-proxy.strpst.com";
+
   function absoluteImage(value) {
     var text = String(value || "").trim();
-    return text.indexOf("//") === 0 ? "https:" + text : text;
+    if (text.indexOf("//") === 0) return "https:" + text;
+    if (text.charAt(0) === "/") return IMAGE_BASE + text;
+    return text;
   }
 
-  function roomDTO(model) {
+  // Stripchat 同一张预览图有 4 档，路径只差结尾的尺寸后缀：
+  //   -thumb-small  200x150（官网列表接口默认返回的就是这一档，铺到卡片上会发糊）
+  //   -thumb-big    400x300
+  //   -full        1000x750
+  //   无后缀         竖版摄像头原始快照（1000+ x 2500+），比例不适合当封面
+  // 列表用 -thumb-big：像素是原来的 4 倍，单张也才 ~25KB，30 个房间多拉约 0.5MB；
+  // 详情页一次只显示一张，直接上 -full，和官网打开房间看到的大图一致。
+  function upgradeImage(value, full) {
+    var url = absoluteImage(value);
+    if (!url) return url;
+    if (url.indexOf("-thumb-small") >= 0) url = url.replace(/-thumb-small/g, "-thumb-big");
+    if (full && url.indexOf("-thumb-big") >= 0) url = url.replace(/-thumb-big/g, "-full");
+    return url;
+  }
+
+  function roomDTO(model, detail) {
     model = normalizeModel(model || {});
     var username = String(model.username || model.name || model.nickname || "未命名主播");
     var modelId = String(model.id !== undefined ? model.id : model.modelId || "");
-    var cover = absoluteImage(model.snapshotUrl || model.previewUrlThumbBig || model.previewUrlThumbSmall || model.avatarUrl || model.previewUrl || model.image);
+    var cover = upgradeImage(model.snapshotUrl || model.previewUrlThumbBig || model.previewUrlThumbSmall || model.avatarUrl || model.previewUrl || model.image, detail);
     var avatar = absoluteImage(model.avatarUrl || model.previewUrlThumbSmall || cover);
     var viewers = model.viewersCount !== undefined ? model.viewersCount : model.viewers;
     return {
@@ -473,7 +494,7 @@
 
     getRoomDetail: async function (input) {
       var model = await resolveRoom(input && input.roomId, input && input.userId);
-      return roomDTO(model);
+      return roomDTO(model, true);
     },
 
     getLiveState: async function (input) {

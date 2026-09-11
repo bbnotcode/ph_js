@@ -145,6 +145,39 @@ async function expectFailure(label, task) {
   assert.strictEqual(rooms[0].liveState, "1");
   assert.strictEqual(rooms[0].userId, "demo_user");
 
+  // 封面清晰度：官网列表接口只返回 200x150 的 -thumb-small，
+  // 直接铺到卡片上会发糊，必须升到 400x300 的 -thumb-big。
+  const savedSnapshot = model.snapshotUrl;
+  delete model.snapshotUrl;
+  model.avatarUrl = "https://static-proxy.strpst.com/avatars/4/5/7/hash-full";
+  model.previewUrlThumbSmall = "https://static-proxy.strpst.com/previews/a/7/8/hash-thumb-small";
+  const listWithThumb = await plugin.getRooms({ id: "girls", page: 1 });
+  assert.strictEqual(
+    listWithThumb[0].roomCover,
+    "https://static-proxy.strpst.com/previews/a/7/8/hash-thumb-big",
+    "-thumb-small 必须升到 -thumb-big"
+  );
+
+  // 详情页一次只显示一张图，直接给 1000x750 的 -full，和官网大图一致。
+  const hdDetail = await plugin.getRoomDetail({ roomId: "123456", userId: "demo_user" });
+  assert.strictEqual(
+    hdDetail.roomCover,
+    "https://static-proxy.strpst.com/previews/a/7/8/hash-full",
+    "详情封面必须升到 -full"
+  );
+
+  // /api/front/v2/* 返回的是相对路径，必须补上图片域名，否则是空封面。
+  model.previewUrlThumbSmall = "/previews/a/7/8/hash-thumb-small";
+  const listWithRelative = await plugin.getRooms({ id: "girls", page: 1 });
+  assert.strictEqual(
+    listWithRelative[0].roomCover,
+    "https://static-proxy.strpst.com/previews/a/7/8/hash-thumb-big",
+    "相对路径必须补成绝对地址"
+  );
+  delete model.avatarUrl;
+  delete model.previewUrlThumbSmall;
+  model.snapshotUrl = savedSnapshot;
+
   const detail = await plugin.getRoomDetail({ roomId: "123456", userId: "demo_user" });
   assert.strictEqual(detail.roomId, "123456");
 
