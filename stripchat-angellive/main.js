@@ -607,26 +607,28 @@
             userAgent: UA,
             headers: quality.local ? localHeaders() : playbackHeaders(),
             requestContext: { roomId: roomId, userId: username },
-            // 引擎顺序 [mePlayer, avPlayer] 和宿主自己对普通 HLS 直播的默认值一致，
-            // 顺序本身就是"主路 mePlayer、起不来再自动回退 avPlayer"。
+            // 这里刻意不发 preferredEngines，把引擎选择权交还宿主。
             //
-            // 1.0.11~1.0.18 一直把这里写死成 ["avPlayer"]，因为当时 mePlayer 会把分片
-            // 地址截断在约 190 字符（u 参数从 136 砍成 109，base64 长度非法），分片一路
-            // 400、重试 8 次后播放线程卡死，表现就是"播一两分钟后画面卡住不动"。
+            // 宿主 RoomPlaybackResolver.resolvePlan 对 streamFormat == .hlsLive（非 LL-HLS）
+            // 的默认顺序就是 [mePlayer, avPlayer]：主路 KSMEPlayer，真起不来时
+            // KSPlayerLayer 会按 playerTypes 顺序自动回退到 KSAVPlayer。
             //
-            // 但 1.0.15 之后分片是官方 CDN 直连地址，实测 12 个直播间 / 51 条分片最长
-            // 只有 107 字符，截断风险已经不存在。
+            // 1.0.11~1.0.18 把这里写死成 ["avPlayer"]，理由是当时 mePlayer 会把分片地址
+            // 截断在约 190 字符（u 参数从 136 砍成 109，base64 长度非法），分片一路 400、
+            // 重试 8 次后播放线程卡死。1.0.15 之后分片走官方 CDN 直连，实测 12 个直播间 /
+            // 51 条分片最长只有 107 字符，这个前提已经不存在。
             //
-            // 而写死 avPlayer 的代价很大：宿主 PlaybackTuning 里 stallMonitoringEnabled
-            // "由内核决定（KSME 主路 true；KSAV/VLC false）"，也就是 KSAVPlayer 这条路上
-            // 零吞吐 watchdog 是关的、卡住后没有任何自愈机制。这正是「其他订阅源的直播
-            // 卡住后能靠按钮恢复、Stripchat 不能」的原因。mePlayer 有起播超时 / 零吞吐
-            // stall 检测和一整条恢复阶梯；真起不来时 KSPlayerLayer 会按顺序回退 avPlayer。
+            // 而写死 avPlayer 的代价是丢掉自愈：宿主 PlaybackTuning 里 stallMonitoringEnabled
+            // "由内核决定（KSME 主路 true；KSAV/VLC false）"，PlaybackRecoveryCoordinator
+            // 对没有字节采样的内核（HLS/KSAVPlayer）直接 return、不判 stall。
+            //
+            // 不写死还有个额外好处：宿主以后调整默认顺序、或者加新引擎（宿主内部还有
+            // VLC 4.0，但那是 App 设置里的开关，插件无权指定），插件都自动跟随，不用
+            // 为了引擎顺序再发一次版。插件只负责声明"这是什么流"。
             //
             // 另外不要声明 lowLatency：低延迟模式只留 2~3 秒缓冲，任何抖动都会直接断流。
             playbackHints: {
               streamFormat: "hlsLive",
-              preferredEngines: ["mePlayer", "avPlayer"],
               isLive: true,
               requiresCustomSegmentLoader: false,
               selectionBehavior: "direct"

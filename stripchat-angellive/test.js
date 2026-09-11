@@ -210,11 +210,15 @@ async function expectFailure(label, task) {
     "playback should target the cloud worker, never a machine-local proxy");
   assert.strictEqual(proxied[0].displayName, "Stripchat 官方线路");
   assert.strictEqual(proxied[0].qualitys[0].liveCodeType, "m3u8");
-  // 引擎顺序必须是 [mePlayer, avPlayer]：宿主的零吞吐 watchdog 只在 KSME 主路开启
-  // （PlaybackTuning：stallMonitoringEnabled 由内核决定，KSME 主路 true；KSAV/VLC false）。
-  // 写死 avPlayer 等于把唯一的自愈路径关掉；avPlayer 必须留作兜底。
-  assert.strictEqual(JSON.stringify(proxied[0].qualitys[0].playbackHints.preferredEngines),
-    '["mePlayer","avPlayer"]', "主路必须是 mePlayer（有 stall 自愈），avPlayer 兜底");
+  // 引擎顺序必须交给宿主决定，插件不能写死。
+  // 宿主对非 LL-HLS 直播的默认顺序是 [mePlayer, avPlayer]；而宿主 PlaybackTuning 里
+  // stallMonitoringEnabled「由内核决定（KSME 主路 true；KSAV/VLC false）」，
+  // PlaybackRecoveryCoordinator 对无字节采样的内核（HLS/KSAVPlayer）直接 return、不判
+  // stall。所以写死 ["avPlayer"]（1.0.11~1.0.18 的行为）等于关掉唯一一条 stall 自愈路径。
+  assert.strictEqual(proxied[0].qualitys[0].playbackHints.preferredEngines, undefined,
+    "不能写死引擎顺序，必须让宿主按自己的默认策略决定");
+  assert.strictEqual(proxied[0].qualitys[0].playbackHints.streamFormat, "hlsLive");
+  assert.strictEqual(proxied[0].qualitys[0].playbackHints.isLive, true);
   assert.strictEqual(proxied[0].qualitys[0].playbackHints.latencyMode, undefined);
   assert.strictEqual(proxied[0].qualitys[0].headers.Referer, undefined);
   assert.strictEqual(proxied[0].qualitys[0].headers.Origin, undefined);

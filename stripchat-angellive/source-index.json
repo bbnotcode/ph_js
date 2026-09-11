@@ -1,11 +1,15 @@
 {
   "apiVersion": 1,
-  "generatedAt": "2026-09-11T15:28:00Z",
+  "generatedAt": "2026-09-11T15:32:48Z",
   "plugins": [
     {
       "pluginId": "stripchat",
-      "version": "1.0.19",
+      "version": "1.0.20",
       "changelog": [
+        "1.0.20: 把播放引擎的选择权完全交还宿主——直接删掉 playbackHints.preferredEngines 字段，不再把宿主的默认策略抄一份到插件里。宿主对非 LL-HLS 直播的默认顺序是 [mePlayer, avPlayer]（主路 KSMEPlayer 有零吞吐 stall 自愈，起不来时自动回退 KSAVPlayer）；宿主以后调默认顺序或加新引擎，插件都自动跟随，不用再为引擎顺序发版",
+        "1.0.20: 插件能表达的引擎只有 mePlayer / avPlayer 两个（LivePlaybackEngine 枚举），宿主还有的 VLC 4.0 是 App 设置里的开关、插件无权指定；想换内核在 App 设置里切即可，不用改插件",
+        "1.0.19: 直播卡住后恢复能力对齐其他订阅源——插件从 1.0.11 起把播放引擎写死成 avPlayer，而宿主 PlaybackTuning 里零吞吐 watchdog（stallMonitoringEnabled）只在 KSME 主路开启、KSAV 是关的，等于 Stripchat 是唯一一条卡住后没有任何自愈的链路",
+        "1.0.19: 当初禁用 mePlayer 是因为它把分片地址截断在约 190 字符（u 参数被砍坏，分片一路 400）；1.0.15 之后分片走官方 CDN 直连，实测 12 个直播间 / 51 条分片最长只有 107 字符，这个前提已经不存在",
         "1.0.19: 直播卡住后恢复能力对齐其他订阅源——插件从 1.0.11 起把播放引擎写死成 avPlayer，而宿主 PlaybackTuning 里零吞吐 watchdog（stallMonitoringEnabled）只在 KSME 主路开启、KSAV 是关的，等于 Stripchat 是唯一一条卡住后没有任何自愈的链路；现在改回宿主自己对普通 HLS 直播的默认顺序 [mePlayer, avPlayer]",
         "1.0.19: 当初禁用 mePlayer 是因为它把分片地址截断在约 190 字符（u 参数被砍坏，分片一路 400）；1.0.15 之后分片走官方 CDN 直连，实测 12 个直播间 / 51 条分片最长只有 107 字符，这个前提已经不存在",
         "1.0.19: 改成 [mePlayer, avPlayer] 后 mePlayer 起不来时 KSPlayerLayer 会自动按顺序回退 avPlayer，最坏情况等于 1.0.18；若起播反而变差，把 preferredEngines 改回 \"avPlayer\" 即可一键回退",
@@ -64,10 +68,10 @@
       "platformDescription": "Stripchat 公开直播源，支持分类、搜索、主播详情和多画质 HLS 播放。解密后的分片地址由播放器直连官方 CDN，视频流量不经过中转，仅清单经云端代理还原。仅限年满 18 岁的用户使用。",
       "icon": "https://assets.chapturist.com/assets/icons/favicon-512x512_stripchat.global.png?v=2609fcdf",
       "zipURLs": [
-        "https://raw.githubusercontent.com/bbnotcode/ph_js/main/stripchat-angellive-1.0.19.zip",
-        "https://cdn.jsdelivr.net/gh/bbnotcode/ph_js@main/stripchat-angellive-1.0.19.zip"
+        "https://raw.githubusercontent.com/bbnotcode/ph_js/main/stripchat-angellive-1.0.20.zip",
+        "https://cdn.jsdelivr.net/gh/bbnotcode/ph_js@main/stripchat-angellive-1.0.20.zip"
       ],
-      "sha256": "543d1045cd8bda48870d79d21ba30af24fc0e7c6c4e7dd480f782e93efcda692",
+      "sha256": "4b4d73a854417c37400c4b93d3149f8a0c7b3f28898e95a3cc8929d6519d8b28",
       "auth": {
         "required": false,
         "credentialKinds": [],
