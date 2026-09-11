@@ -20,6 +20,16 @@ const SEGMENT_RE = /_([^_]+)_(\d+(?:_part\d+)?)\.mp4(?:[?#].*)?/;
 const ALLOWED_UPSTREAM_HOST = /(^|\.)(doppiocdn\.(org|com|live|net)|stripchat\.(com|global))$/i;
 const MOUFLON_ADVERT = /#EXT-X-MOUFLON-ADVERT/i;
 
+/* ------------------------- 订阅源镜像（绕开 raw / jsDelivr 缓存） ------------------------- */
+
+const SUB_REPO = "bbnotcode/ph_js";
+const SUB_BRANCH = "main";
+const SUB_RAW = `https://raw.githubusercontent.com/${SUB_REPO}/${SUB_BRANCH}/`;
+const SUB_MIRROR = `https://cdn.jsdelivr.net/gh/${SUB_REPO}@${SUB_BRANCH}/`;
+const SUB_INDEX_TTL_SECONDS = 60;
+const SUB_ZIP_TTL_SECONDS = 3600;
+const SUB_FILE_RE = /^[A-Za-z0-9._-]+\.(json|zip)$/;
+
 /* 社区公开的 pkey -> pdkey 密钥表（离线兜底，可用环境变量 MOONFLON_KEYS_JSON 覆盖） */
 const BUNDLED_KEYS = {
   "1Dzcc6OjP73LKbtI": "Y64UVwX5RrIWnOLp",
@@ -384,12 +394,101 @@ async function handleSegment(url, env, ctx) {
   return response;
 }
 
+/* --------------------------- 订阅源镜像（路由） --------------------------- */
+
+async function fetchSubscriptionFile(path) {
+  const errors = [];
+  for (const base of [SUB_RAW, SUB_MIRROR]) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 15000);
+    try {
+      const res = await fetch(base + path, {
+        headers: { "User-Agent": UA, "Accept": "*/*" },
+        signal: controller.signal
+      });
+      if (res.ok) return res;
+      errors.push(`${base} -> HTTP ${res.status}`);
+    } catch (error) {
+      errors.push(`${base} -> ${error && error.message}`);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  throw new Error(errors.join("; "));
+}
+
+// 把订阅源里的 zipURLs 改写成走本 Worker，原始地址保留在后面兜底。
+function rewriteSubscriptionIndex(bodyText, origin) {
+  const data = JSON.parse(bodyText);
+  for (const plugin of data.plugins || []) {
+    const urls = Array.isArray(plugin.zipURLs) ? plugin.zipURLs : [];
+    const local = [];
+    for (const url of urls) {
+      const name = String(url).split("?")[0].split("/").pop();
+      if (SUB_FILE_RE.test(name) && name.endsWith(".zip")) local.push(`${origin}/sub/${name}`);
+    }
+    plugin.zipURLs = [...new Set(local)].concat(urls);
+  }
+  return JSON.stringify(data, null, 2) + "\n";
+}
+
+async function handleSubscription(request, path, env, ctx) {
+  if (!SUB_FILE_RE.test(path)) return text("not found", 404);
+
+  const origin = new URL(request.url).origin;
+  const isIndex = path.endsWith(".json");
+  const ttl = isIndex ? SUB_INDEX_TTL_SECONDS : SUB_ZIP_TTL_SECONDS;
+  const cache = typeof caches !== "undefined" ? caches.default : null;
+  const cacheKey = new Request(`${origin}/sub/${path}`, { method: "GET" });
+  if (cache) {
+    try {
+      const hit = await cache.match(cacheKey);
+      if (hit) return hit;
+    } catch (_) { /* 缓存不可用就走回源 */ }
+  }
+
+  let upstream;
+  try {
+    upstream = await fetchSubscriptionFile(path);
+  } catch (error) {
+    return text(`订阅源获取失败：${error && error.message}`, 502);
+  }
+
+  let body;
+  let contentType = "application/zip";
+  try {
+    if (isIndex) {
+      contentType = "application/json; charset=utf-8";
+      body = rewriteSubscriptionIndex(await upstream.text(), origin);
+    } else {
+      body = await upstream.arrayBuffer();
+    }
+  } catch (error) {
+    return text(`订阅源处理失败：${error && error.message}`, 502);
+  }
+
+  const response = new Response(body, {
+    status: 200,
+    headers: {
+      "Content-Type": contentType,
+      "Cache-Control": `public, max-age=${ttl}`,
+      "Access-Control-Allow-Origin": "*"
+    }
+  });
+  if (cache && ctx && typeof ctx.waitUntil === "function") {
+    ctx.waitUntil(cache.put(cacheKey, response.clone()).catch(() => {}));
+  }
+  return response;
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     const pathname = decodeURIComponent(url.pathname);
     try {
       if (pathname === "/health") return json({ ok: true, runtime: "cloudflare-worker" });
+      const sub = pathname.match(/^\/sub\/([^/]+)$/);
+      if (sub) return await handleSubscription(request, sub[1], env, ctx);
       if (pathname === "/seg" || /^\/seg\/[^/]*\.mp4$/.test(pathname)) return await handleSegment(url, env, ctx);
 
       const play = pathname.match(/^\/play\/([^/]+?)(?:\/([^/]+))?\.m3u8$/);

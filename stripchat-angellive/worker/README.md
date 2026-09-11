@@ -21,6 +21,30 @@ npx wrangler deploy
 `~/stripchat-mouflon-proxy/worker/src/index.js` 是实际部署的那份，本目录与它保持一致，
 改动后请同步过去再 deploy。
 
+## 路由
+
+| 路径 | 说明 |
+| --- | --- |
+| `/health` | 健康检查 |
+| `/play/<streamId>/index.json` | 画质列表，边缘缓存 30s |
+| `/play/<streamId>/<variant>.m3u8` | 解密后的媒体清单 |
+| `/seg/segment.mp4?u=&k=` | 分片转发，边缘缓存 120s |
+| `/sub/<文件名>` | 订阅源镜像，见下 |
+
+### `/sub/` 订阅镜像
+
+固定从 `bbnotcode/ph_js` 的 `main` 拉取（raw 优先，jsDelivr 兜底），只允许
+`*.json` / `*.zip`，避免变成开放代理。
+
+返回订阅索引时会把 `zipURLs` 改写成走本 Worker，原始地址保留在后面兜底，
+这样设备只需要能连上 Cloudflare：
+
+```text
+https://stripchat-mouflon-proxy.douyin-skip-community.workers.dev/sub/source-index.json
+```
+
+索引边缘缓存 60 秒，zip 缓存 1 小时（同版本内容不变）。
+
 ## 密钥
 
 内置了社区公开的 `pkey -> pdkey` 兜底表，运行时每 6 小时从

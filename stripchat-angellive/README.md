@@ -46,13 +46,22 @@ curl -s https://stripchat-mouflon-proxy.douyin-skip-community.workers.dev/health
 分支根目录，然后在 AngelLive 中添加订阅地址：
 
 ```text
-https://raw.githubusercontent.com/bbnotcode/ph_js/main/source-index.json
+https://stripchat-mouflon-proxy.douyin-skip-community.workers.dev/sub/source-index.json
 ```
 
 订阅列表图标使用 Stripchat 官网声明的 512×512 PNG 应用图标。
 
-> 更新订阅后，若在设备上仍看到旧版本，是 jsDelivr 的缓存（部分网络会把
-> `raw.githubusercontent.com` 重定向到 jsDelivr）。执行一次即可强制刷新：
+**推荐用上面这条 Worker 地址**：它由云端 Worker 回源拉取订阅，并在返回的
+`zipURLs` 里把插件包也改写成走 Worker，所以设备全程只依赖 Cloudflare——
+不需要能访问 `raw.githubusercontent.com`（国内多数网络不通），也不用管
+jsDelivr 的分支缓存。索引边缘只缓存 60 秒，发新版大约 1 分钟就能被设备看到。
+
+`worker/index.js` 里的 `/sub/<文件名>` 路由只允许 `*.json` / `*.zip`，且固定从
+`bbnotcode/ph_js` 的 `main` 拉取，不会被当成开放代理。
+
+> 仍然想用 GitHub / jsDelivr 地址的话，注意分支缓存：jsDelivr 对 `@main` 是
+> CDN 12 小时、客户端 7 天。更新后需要 purge，而且单次 purge 常常要等一两分钟
+> 甚至再执行一次才生效：
 >
 > ```bash
 > curl -s "https://purge.jsdelivr.net/gh/bbnotcode/ph_js@main/source-index.json"
