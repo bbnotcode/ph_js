@@ -51,6 +51,16 @@ https://raw.githubusercontent.com/bbnotcode/ph_js/main/source-index.json
 
 订阅列表图标使用 Stripchat 官网声明的 512×512 PNG 应用图标。
 
+> 更新订阅后，若在设备上仍看到旧版本，是 jsDelivr 的缓存（部分网络会把
+> `raw.githubusercontent.com` 重定向到 jsDelivr）。执行一次即可强制刷新：
+>
+> ```bash
+> curl -s "https://purge.jsdelivr.net/gh/bbnotcode/ph_js@main/source-index.json"
+> ```
+>
+> 或改用带 commit 的固定地址（永久生效，不随 main 更新）：
+> `https://cdn.jsdelivr.net/gh/bbnotcode/ph_js@<commit>/source-index.json`
+
 > 不支持私房、群组秀或付费视频。插件不会绕过 Stripchat 的访问控制或付费墙。
 
 > 注意：这个版本依赖 `PROXY_HOSTS` 里的解密代理。云端 Worker 地址是作者自有的，
