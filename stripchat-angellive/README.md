@@ -1,14 +1,14 @@
 # Stripchat for AngelLive
 
-AngelLive API v1 插件，仅枚举和播放 Stripchat `public` 状态的直播。
+AngelLive API v1 插件，仅枚举和播放 Stripchat `public` 状态的公开直播。
 
 ## 文件
 
 - `manifest.json`：AngelLive 插件清单。
 - `main.js`：分类、房间、搜索、详情、状态和 HLS 播放实现。
-- `test.js`：`node test.js` 运行契约测试（含代理路径与直连回退路径）。
-- `stripchat-angellive-1.0.22.zip`：可安装插件包，包含 AngelLive 列表和首页平台卡片图标。
-- `worker/`：Cloudflare Worker 版解密代理源码。
+- `test.js`：`node test.js` 运行插件契约测试。
+- `stripchat-angellive-1.0.25.zip`：可安装插件包，包含 AngelLive 列表和首页平台卡片图标。
+- `worker/`：Cloudflare Worker 版清单转换代理源码；进入该目录运行 `npm test` 可测试核心转换逻辑。
 - `source-index.json`：AngelLive 订阅源索引。
 
 ## 加载超时保护（闪退）
@@ -16,16 +16,16 @@ AngelLive API v1 插件，仅枚举和播放 Stripchat `public` 状态的直播�
 AngelLive 对 `getPlayback` 有整体超时。旧版本最坏情况要串行等：
 
 - 代理探测 `2 + 10 + 2 = 14` 秒（本机 / 云端 / Bonjour 依次试）
-- 直连回退 `3 × 10 = 30` 秒（三个 CDN 域名依次试）
+- 旧的上游直连回退 `3 × 10 = 30` 秒（三个 CDN 域名依次试）
 
 合计 40 秒以上，宿主会先放弃，表现就是「转圈很久然后直接闪退」。
 
 现在：
 
 - `qualitiesFor` 整体加 **12 秒硬上限**，超时抛出可读的 `TIMEOUT` 错误而不是把宿主拖死；
-- 直连回退的三个 CDN 域名改为**并发**，最坏耗时从 30 秒降到 5 秒；
+- Worker 的四个 CDN 域名改为**并发**探测，最坏只等待一个超时周期；
 - 云端代理探测超时 10 → 6 秒；
-- 解析失败的流做 **8 秒负缓存**，反复点击不会重跑整轮探测；
+- 插件侧解析失败做 **4 秒负缓存**，反复点击不会立刻重跑整轮探测；
 - Worker 侧 `loadMaster` 也改成四域名并发 + 15 秒失败负缓存（最坏 36 秒 → 4.5 秒）。
 
 ## 播放引擎：不写死，交还宿主（1.0.20）
@@ -110,7 +110,7 @@ var PROXY_HOSTS = [
 `127.0.0.1:8787`）已经不再被引用——留着当手动备用即可，想临时切回去就把
 `{ base: "http://127.0.0.1:8787", timeout: 2 }` 加回数组最前面。
 
-云端 Worker 不可用时会回退到旧的直连逻辑（此时通常播不出来），不会再去找机器本地进程。
+云端 Worker 不可用时会直接给出线路错误，不再把无法识别 Mouflon 扩展的上游清单交给播放器，也不会再去找机器本地进程。
 
 ### 视频不再经过 Cloudflare（1.0.15 关键改动）
 
@@ -300,8 +300,9 @@ jsDelivr 的分支缓存。索引边缘只缓存 60 秒，发新版大约 1 分�
 > 或改用带 commit 的固定地址（永久生效，不随 main 更新）：
 > `https://cdn.jsdelivr.net/gh/bbnotcode/ph_js@<commit>/source-index.json`
 
-> 门票场 / 组秀 / 私房 / 付费视频都不支持播放。插件不会绕过 Stripchat 的访问控制或付费墙，
-> 但会把这类房间照常显示出来并标注状态，点进去给一句人话提示（见下一节）。
+> 门票场 / 组秀 / 私房 / 付费视频都不支持播放。AngelLive macOS 无法在播放器窗口展示插件
+> 返回的具体错误，只会停在 CONNECTING，因此这些不可播放房间会直接从列表和搜索中隐藏。
+> 插件不会绕过 Stripchat 的访问控制或付费墙。
 
 > 注意：这个版本依赖 `PROXY_HOSTS` 里的解密代理。云端 Worker 地址是作者自有的，
 > 别人装了会共用同一个 Worker 并消耗作者账号的额度。要长期分享，建议让使用者

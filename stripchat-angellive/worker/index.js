@@ -7,7 +7,6 @@
  */
 
 const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36";
-const CDN_TLDS = ["org", "com", "net", "live"];
 const MEDIA_TLDS = ["org", "com", "net", "live"];
 const EDGE_TLDS = ["org", "com", "net", "live"];
 const KEY_URL = "https://mouflon.chantrail.com/api/keys";
@@ -114,7 +113,7 @@ async function getKeys(env) {
       if (res.ok) {
         const parsed = await res.json();
         if (parsed && parsed.keys && Object.keys(parsed.keys).length) {
-          keyCache = { at: Date.now(), keys: parsed.keys };
+          keyCache = { at: Date.now(), keys: { ...bundled, ...parsed.keys } };
           return keyCache.keys;
         }
       }
@@ -333,7 +332,6 @@ async function rewriteMediaPlaylist(bodyText, baseURL, pkey, pdkey, mode) {
   const out = [];
   let count = 0;
   let pendingEncrypted = null;
-  let sawParts = false;
 
   // 直连模式下解不开的分片一律退回代理，绝不产出播放器拿不到的地址。
   const segmentTarget = async (absolute) => {
@@ -351,8 +349,8 @@ async function rewriteMediaPlaylist(bodyText, baseURL, pkey, pdkey, mode) {
     if (!line) continue;
 
     if (line.startsWith("#EXT-X-MOUFLON:URI:")) { pendingEncrypted = line.slice("#EXT-X-MOUFLON:URI:".length); continue; }
-    if (line.startsWith("#EXT-X-PRELOAD-HINT:") || line.startsWith("#EXT-X-RENDITION-REPORT:")) { sawParts = true; continue; }
-    if (line.startsWith("#EXT-X-PART:")) { sawParts = true; continue; }
+    if (line.startsWith("#EXT-X-PRELOAD-HINT:") || line.startsWith("#EXT-X-RENDITION-REPORT:")) continue;
+    if (line.startsWith("#EXT-X-PART:")) continue;
     if (line.startsWith("#EXT-X-MOUFLON")) continue;
 
     if (line.startsWith("#EXT-X-MAP:")) {
@@ -375,7 +373,7 @@ async function rewriteMediaPlaylist(bodyText, baseURL, pkey, pdkey, mode) {
     }
     // 没有对应 Mouflon URI 的裸分片行（占位 media.mp4）丢弃
   }
-  return { playlist: out.join("\n") + "\n", segmentCount: count, sawParts };
+  return { playlist: out.join("\n") + "\n", segmentCount: count };
 }
 
 function alternateHosts(url) {
@@ -540,8 +538,8 @@ async function handleSegment(url, env, ctx) {
   if (!ALLOWED_UPSTREAM_HOST.test(hostname)) return text("upstream host not allowed", 403);
 
   const keys = await getKeys(env);
-  const pdkey = keys[pkey] || Object.values(keys)[0];
-  if (!pdkey) return text("没有可用的 Mouflon 解密密钥", 502);
+  const pdkey = keys[pkey];
+  if (!pdkey) return text(`没有与 pkey ${pkey || "(empty)"} 匹配的 Mouflon 解密密钥`, 502);
 
   const decrypted = await decryptSegmentURL(encryptedURL, pdkey);
   const target = decrypted || encryptedURL;
@@ -699,4 +697,13 @@ export default {
       return text(`proxy error: ${error && error.message}`, 502);
     }
   }
+};
+
+// 仅供本地单元测试导入；不会成为 Worker 的 HTTP 路由或公开接口。
+export const __test = {
+  compactSegmentTarget,
+  decodeSegmentParam,
+  decryptSegmentURL,
+  parseMaster,
+  rewriteMediaPlaylist
 };

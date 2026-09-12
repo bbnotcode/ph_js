@@ -1,10 +1,12 @@
 {
   "pluginId": "stripchat",
-  "version": "1.0.22",
+  "version": "1.0.25",
   "apiVersion": 1,
   "displayName": "Stripchat 直播",
   "platformDescription": "Stripchat 公开直播源，支持分类、搜索、主播详情和多画质 HLS 播放。解密后的分片地址由播放器直连官方 CDN，视频流量不经过中转，仅清单经云端代理还原。仅限年满 18 岁的用户使用。",
   "changelog": [
+    "1.0.25: AngelLive macOS 无法在播放器内显示插件的不可播原因，门票场 / 组秀 / 私密 / 其他付费房间改为从列表和搜索中隐藏，只展示真正可播放的公开直播，彻底避免点击后卡在 CONNECTING",
+    "1.0.23: 清理失效的直连回退和重复代理排序逻辑；修正 Worker 密钥合并与未知 pkey 处理，并新增 Worker 核心单元测试",
     "1.0.22: 播不了的提示里直接带上主播官网链接，方便自己核实「到底是他真收费了，还是线路问题」——例：该主播当前是门票场，需要先购票才能观看；AngelLive 播放不了付费场次。要核实可直接在浏览器打开：https://zh.stripchat.global/TFOOTF",
     "1.0.22: 该链接和「复制直播间链接 / 在浏览器打开」同源（都用 zh.stripchat.global/{userId} 模板），test.js 加了断言把 main.js 的 ROOM_PAGE_BASE 和 manifest 的 externalRoomURLTemplate 锁在一起，改一个不改另一个会直接测失败",
     "1.0.22: 链接覆盖所有播不了的路径——付费场次 / 已下播 / 上游抖动 / 解析超时 / 连不上接口 / 没有可用流，都会在句尾附上官网地址",

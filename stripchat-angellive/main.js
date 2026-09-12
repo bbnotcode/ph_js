@@ -120,13 +120,6 @@
   }
 
   function apiHeaders() { return headers("application/json, text/plain, */*"); }
-  function playbackHeaders() {
-    return {
-      "User-Agent": UA,
-      "Accept": "application/vnd.apple.mpegurl, application/x-mpegURL, */*"
-    };
-  }
-
   async function get(url, requestHeaders, timeout) {
     var response = await Host.http.request({
       request: { url: url, method: "GET", headers: requestHeaders || {}, timeout: timeout || 20 }
@@ -292,8 +285,6 @@
       roomTitle: label ? username + " 的直播 · " + label : username + " 的直播",
       roomCover: cover,
       userHeadImg: avatar,
-      // 在线但要付费的房间也是「在直播」，报 "1" 才能让宿主允许点进去，
-      // 进去后由 getPlayback 给出明确提示；报 "0" 会被当成下播直接挡掉。
       liveState: kind === "offline" ? "0" : "1",
       userId: username,
       roomId: modelId || username,
@@ -324,8 +315,9 @@
     parts.push("uniq=" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6));
     var root = payload(await currentAPI("/api/front/models?" + parts.join("&"), 20));
     var models = root.models || root.items || root.users || root.results || [];
-    // 只过滤真没播的；付费 / 私密 / 组秀 也保留在列表里，并标注出状态。
-    return models.map(normalizeModel).filter(function (item) { return roomKind(item) !== "offline"; });
+    // AngelLive macOS 会吞掉不可播错误并一直显示 CONNECTING，因此列表和搜索只保留
+    // 真正有公开 HLS 的 public 房间；门票场 / 组秀 / 私密 / 其他付费状态全部隐藏。
+    return models.map(normalizeModel).filter(function (item) { return roomKind(item) === "public"; });
   }
 
   async function fetchModels(tag, page) {
@@ -390,17 +382,22 @@
     var variants = data && data.variants || [];
     if (!variants.length) throw Host.makeError("PROXY", "Mouflon 解密代理未返回可用画质", { url: url });
     return variants.map(function (item) {
-      return { title: item.title || item.name || "自动", qn: item.height || 0, url: item.url, local: true };
+      return { title: item.title || item.name || "自动", qn: item.height || 0, url: item.url };
     }).sort(function (a, b) { return b.qn - a.qn; });
   }
 
-  async function proxyQualities(streamId, bust) {
-    // 命中过的代理排在最前，其余按配置顺序兜底。
+  function orderedProxyHosts() {
     var order = [];
     if (proxyBaseCache) order.push(proxyBaseCache);
     for (var i = 0; i < PROXY_HOSTS.length; i += 1) {
       if (!proxyBaseCache || PROXY_HOSTS[i].base !== proxyBaseCache.base) order.push(PROXY_HOSTS[i]);
     }
+    return order;
+  }
+
+  async function proxyQualities(streamId, bust) {
+    // 命中过的代理排在最前，其余按配置顺序兜底。
+    var order = orderedProxyHosts();
     var last = null;
     for (var j = 0; j < order.length; j += 1) {
       try {
@@ -449,11 +446,7 @@
 
   async function probeLiveViaProxy(streamId) {
     if (!streamId) return "3";
-    var order = [];
-    if (proxyBaseCache) order.push(proxyBaseCache);
-    for (var i = 0; i < PROXY_HOSTS.length; i += 1) {
-      if (!proxyBaseCache || PROXY_HOSTS[i].base !== proxyBaseCache.base) order.push(PROXY_HOSTS[i]);
-    }
+    var order = orderedProxyHosts();
     for (var j = 0; j < order.length; j += 1) {
       var state = await proxyLiveStateAt(order[j], streamId);
       if (state !== "3") return state;
@@ -661,7 +654,7 @@
             liveCodeType: "m3u8",
             liveType: "stripchat",
             userAgent: UA,
-            headers: quality.local ? localHeaders() : playbackHeaders(),
+            headers: localHeaders(),
             requestContext: { roomId: roomId, userId: username },
             // 这里刻意不发 preferredEngines，把引擎选择权交还宿主。
             //

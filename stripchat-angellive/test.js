@@ -203,7 +203,6 @@ async function expectFailure(label, task) {
   proxyAvailable = true;
   proxyRequests.length = 0;
   playlistRequests.length = 0;
-  proxyRequests.length = 0;
   const masterHostsBeforeProxy = masterHosts.length;
   const proxied = await plugin.getPlayback({ roomId: "123456", userId: "demo_user" });
   assert.strictEqual(proxyRequests.length, 1);
@@ -305,17 +304,14 @@ async function expectFailure(label, task) {
   extraModels = [ticketModel, offlineModel];
   camModelFor = { ticket_user: ticketModel };
   const mixed = await plugin.getRooms({ id: "girls", page: 1 });
-  assert.strictEqual(mixed.length, 2, "付费场次要保留在列表里，只过滤真下播的");
+  assert.strictEqual(mixed.length, 1, "列表只能保留真正可播放的公开房间");
   assert.strictEqual(mixed.filter((room) => room.userId === "gone_user").length, 0,
     "isLive=false 的房间必须过滤掉");
-  const ticketRoom = mixed.filter((room) => room.userId === "ticket_user")[0];
-  assert.ok(ticketRoom, "门票场必须出现在列表里");
-  assert.ok(ticketRoom.roomTitle.indexOf("门票场") >= 0, "标题必须标出门票场：" + ticketRoom.roomTitle);
-  assert.strictEqual(ticketRoom.liveState, "1", "门票场也是在播，报 1 才能点进去");
-  assert.strictEqual(ticketRoom.liveWatchedCount, "门票场", "状态标签要顶掉观看人数，用户一眼能看到");
+  assert.strictEqual(mixed.filter((room) => room.userId === "ticket_user").length, 0,
+    "门票场必须从列表隐藏，避免进入 CONNECTING");
 
   // 门票场没有公开分片，代理必然拿不到清单（404）。
-  // 这时绝不能把代理错误原样抛给用户，必须说明是付费场次。
+  // 列表已经识别出门票场时，应立即说明原因，不能再先探一次注定失败的代理。
   indexStatus = 404;
   await expectFailure("门票场必须给出人话提示", async () => {
     try {
@@ -333,9 +329,10 @@ async function expectFailure(label, task) {
       throw error;
     }
   });
-  // 直播状态也必须报在播，否则宿主的收藏列表会把正在播的主播标成已下播。
+  // 已经存在于收藏中的旧门票场仍要正确识别为在线，避免错误标成下播；
+  // 新的列表和搜索不会再把这类房间加入收藏入口。
   const ticketState = await plugin.getLiveState({ roomId: "900001", userId: "ticket_user" });
-  assert.strictEqual(ticketState.liveState, "1", "门票场的 liveState 必须是 1，不能是 0");
+  assert.strictEqual(ticketState.liveState, "1", "旧收藏里的门票场不能误报为下播");
   indexStatus = 200;
   extraModels = [];
   camModelFor = {};
