@@ -272,7 +272,7 @@ Stripchat 的房间状态不止「公开」和「没播」两种。`/api/front/m
 
 ## 订阅
 
-把 `source-index.json` 和 `stripchat-angellive-1.0.22.zip` 一起上传到 `bbnotcode/ph_js` 的 `main`
+把 `source-index.json` 和 `stripchat-angellive-1.0.25.zip` 一起上传到 `bbnotcode/ph_js` 的 `main`
 分支根目录，然后在 AngelLive 中添加订阅地址：
 
 ```text
