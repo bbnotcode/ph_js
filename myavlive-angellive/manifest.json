@@ -1,0 +1,38 @@
+{
+  "pluginId": "myavlive",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "displayName": "Myavlive 直播",
+  "platformDescription": "Myavlive 公开直播源，支持分类、搜索、主播详情和多画质 HLS 播放。仅展示无需登录即可访问的公开直播；仅限年满 18 岁的用户使用。",
+  "changelog": [
+    "1.0.0: 首个 Angel Live 插件版本",
+    "1.0.0: 接入 Myavlive 官方主播列表、分类、搜索和分享链接解析",
+    "1.0.0: 仅展示可公开播放的直播间，隐藏门票场、组秀、私密及其他付费场次",
+    "1.0.0: 支持多画质 HLS；解密后的分片由播放器直连官方 CDN"
+  ],
+  "liveTypes": ["myavlive"],
+  "entry": "main.js",
+  "shareResolve": {
+    "hosts": ["myavlive.com", "zh.myavlive.com"],
+    "keywords": ["myavlive"]
+  },
+  "hostBehavior": {
+    "favoriteIdentityKey": "userId",
+    "preserveFavoriteRoomInfoOnRefresh": true,
+    "liveStateFailureFallback": "3",
+    "supportsLiveEndPolling": true,
+    "playableLiveStates": ["1"],
+    "externalRoomURLTemplate": "https://zh.myavlive.com/{userId}",
+    "themeColor": "#FA5C82"
+  },
+  "capabilities": {
+    "categories": "available",
+    "rooms": "available",
+    "playback": "available",
+    "search": {"status": "partial", "reason": "搜索当前在线公开主播"},
+    "roomDetail": "available",
+    "liveState": "available",
+    "shareResolve": "available",
+    "danmaku": "unavailable"
+  }
+}
