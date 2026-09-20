@@ -8,7 +8,7 @@ const WidgetMetadata = {
   id: 'madou8-mini-library',
   name: '麻豆视频',
   title: '麻豆视频',
-  version: '1.0.1',
+  version: '1.1.0',
   requiredVersion: '0.0.1',
   author: 'Alan huang',
   site: MADOU8_DEFAULT_BASE,
@@ -19,7 +19,7 @@ const WidgetMetadata = {
 
 const SECTIONS = [
   { id: 'recent', title: '最近更新', path: 'videos/recent', style: 'discover.ranked' },
-  { id: 'hot-month', title: '本月热门', path: 'videos/hot/month', style: 'discover.spotlight' },
+  { id: 'hot-month', title: '本月热门', sourceTitle: '热门影片', path: 'videos/hot/month', style: 'discover.spotlight' },
   { id: 'new-releases', title: '新作上市', path: 'videos/new-releases', style: 'discover.posterCompact' },
   { id: '4k', title: '4K', path: 'videos/tag/4K', style: 'discover.posterCompact' },
   { id: 'collections', title: '合集', path: 'videos/tag/%E5%90%88%E9%9B%86', style: 'discover.posterCompact' }
@@ -38,12 +38,30 @@ function getManifest() {
 }
 
 async function getHome(ctx) {
+  let homeHtml = '';
   let recent = [];
-  try { recent = parseCards(await fetchText(ctx, listURL(ctx, SECTIONS[0], 1)), ctx).slice(0, 18); } catch (_) {}
+  try {
+    homeHtml = await fetchText(ctx, entryURL(ctx));
+    recent = parseHomeSectionCards(homeHtml, SECTIONS[0].title, ctx).slice(0, 18);
+  } catch (_) {}
+  if (!recent.length) {
+    try { recent = parseCards(await fetchText(ctx, listURL(ctx, SECTIONS[0], 1)), ctx).slice(0, 18); } catch (_) {}
+  }
+  const previewPairs = await Promise.all(SECTIONS.map(async function (section) {
+    if (section.id === 'recent' && recent.length) return { section: section, items: recent };
+    const embedded = parseHomeSectionCards(homeHtml, section.sourceTitle || section.title, ctx).slice(0, 3);
+    if (embedded.length) return { section: section, items: embedded };
+    try {
+      return { section: section, items: parseCards(await fetchText(ctx, listURL(ctx, section, 1)), ctx).slice(0, 3) };
+    } catch (_) { return { section: section, items: [] }; }
+  }));
+  const categoryItems = previewPairs.map(function (pair) {
+    return categoryPreviewCard(pair.section, pair.items);
+  }).filter(Boolean);
   return {
     pageType: 'home', id: 'madou8-home', title: WidgetMetadata.title, heroAspectRatio: '16:9',
     hero: recent.slice(0, 6).map(wideItem),
-    sections: [{ id: 'madou8-categories', title: '分类浏览', style: 'discover.annualCategories', lazy: false, items: SECTIONS.map(categoryCard) },
+    sections: [{ id: 'madou8-categories', title: '分类浏览', style: 'discover.annualPosterStack', lazy: false, items: categoryItems },
       { id: 'recent', title: '最近更新', style: 'discover.ranked', lazy: false, moreAction: categoryAction(SECTIONS[0]), items: ranked(recent) }
     ].concat(SECTIONS.slice(1).map(sectionShell))
   };
@@ -116,8 +134,12 @@ async function resolvePlayback(ctx) {
   ctx = normalizeContext(ctx);
   const url = detailURL(ctx);
   if (!url) throw new Error('播放参数无效：缺少详情地址或视频 ID');
-  const html = await fetchText(ctx, url);
-  const uid = String(ctx.videoUid || extractVideoUid(html) || '');
+  const decoded = decodeVersionId(ctx.versionId);
+  let uid = String(ctx.videoUid || decoded.uid || '');
+  if (!uid) {
+    const html = await fetchText(ctx, url);
+    uid = String(extractVideoUid(html) || '');
+  }
   if (!uid) throw new Error('播放解析失败：详情页未找到 video_uid');
   const info = await fetchStreamInfo(ctx, uid, url);
   const requestedHeight = positiveInt(ctx.qualityId || decodeVersionId(ctx.versionId).height, 0);
@@ -153,12 +175,9 @@ async function discoverVariants(ctx, playlist, detailUrl) {
       const body = await fetchHlsText(ctx, url, detailUrl);
       const variants = parseMaster(body, url);
       if (variants.length) {
-        const checked = await Promise.all(variants.slice(0, 6).map(async function (variant) {
-          return await verifyMediaStream(ctx, variant.url, detailUrl) ? variant : null;
-        }));
-        const healthy = checked.filter(Boolean).sort(function (a, b) { return b.height - a.height; });
-        if (healthy.length) discovered.push.apply(discovered, healthy);
-      } else if (/#EXTINF/i.test(body) && await probeFirstSegment(ctx, body, url, detailUrl)) {
+        discovered.push.apply(discovered, variants.slice(0, 6));
+        break;
+      } else if (/#EXTINF/i.test(body)) {
         const inferred = inferQuality(url);
         if (inferred) discovered.push(inferred);
       }
@@ -176,7 +195,7 @@ async function chooseStream(ctx, playlist, requestedHeight, detailUrl) {
       const body = await fetchHlsText(ctx, item.url, detailUrl);
       const variants = parseMaster(body, item.url).sort(function (a, b) { return b.height - a.height; });
       if (!variants.length) {
-        if (!/#EXTINF/i.test(body) || !await probeFirstSegment(ctx, body, item.url, detailUrl)) continue;
+        if (!/#EXTINF/i.test(body)) continue;
         const inferred = inferQuality(item.url) || { url: item.url, height: 0 };
         inferred.url = item.url;
         if (!fallback) fallback = inferred;
@@ -186,52 +205,24 @@ async function chooseStream(ctx, playlist, requestedHeight, detailUrl) {
           ? variants.filter(function (x) { return x.height === requestedHeight; }).concat(variants.filter(function (x) { return x.height !== requestedHeight; }))
           : variants;
         for (let j = 0; j < ordered.length; j++) {
-          if (await verifyMediaStream(ctx, ordered[j].url, detailUrl)) return ordered[j];
+          try {
+            const mediaBody = await fetchHlsText(ctx, ordered[j].url, detailUrl);
+            if (!/#EXTINF/i.test(mediaBody)) continue;
+            if (!fallback) fallback = ordered[j];
+            return ordered[j];
+          } catch (_) {}
         }
       }
     } catch (_) {}
   }
   if (fallback) return fallback;
-  throw new Error('播放线路检查失败：所有清单或首个媒体分片均不可用');
+  throw new Error('播放线路检查失败：所有线路均未返回有效的 HLS 媒体清单');
 }
 
 async function fetchHlsText(ctx, url, detailUrl) {
   const body = await fetchText(ctx, url, playbackHeaders(ctx, detailUrl));
   if (!/^\s*#EXTM3U/i.test(body)) throw new Error('HLS 清单无效：' + url);
   return body;
-}
-
-async function verifyMediaStream(ctx, url, detailUrl) {
-  try {
-    const body = await fetchHlsText(ctx, url, detailUrl);
-    return /#EXTINF/i.test(body) && await probeFirstSegment(ctx, body, url, detailUrl);
-  } catch (_) { return false; }
-}
-
-async function probeFirstSegment(ctx, playlistText, playlistUrl, detailUrl) {
-  const segment = firstMediaURI(playlistText, playlistUrl);
-  if (!segment) return false;
-  try {
-    const response = await httpGet(segment, { headers: Object.assign({}, playbackHeaders(ctx, detailUrl), { Range: 'bytes=0-1023' }) });
-    const status = responseStatus(response);
-    return status === 0 || status === 200 || status === 206;
-  } catch (_) { return false; }
-}
-
-function firstMediaURI(text, playlistUrl) {
-  const lines = String(text || '').split(/\r?\n/);
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trim();
-    if (line && line.charAt(0) !== '#') return resolveURL(line, playlistUrl);
-  }
-  return '';
-}
-
-function responseStatus(response) {
-  if (!response || typeof response !== 'object') return 0;
-  const value = response.status != null ? response.status : response.statusCode != null ? response.statusCode : response.code;
-  const number = Number(value);
-  return isFinite(number) ? number : 0;
 }
 
 function inferQuality(url) {
@@ -272,12 +263,37 @@ function parseCards(html, ctx) {
   return items;
 }
 
+function parseHomeSectionCards(html, title, ctx) {
+  html = String(html || '');
+  const headingPattern = new RegExp('<h[1-6]\\b[^>]*>\\s*' + escapeRegExp(title) + '\\s*</h[1-6]>', 'i');
+  const heading = headingPattern.exec(html);
+  if (!heading) return [];
+  const blockMarker = /<div\b[^>]*class=["'][^"']*streamit-video-grid-block\b[^"']*["'][^>]*>/gi;
+  let start = -1; let match;
+  while ((match = blockMarker.exec(html)) && match.index < heading.index) start = match.index;
+  if (start < 0) start = heading.index;
+  blockMarker.lastIndex = heading.index + heading[0].length;
+  const next = blockMarker.exec(html);
+  return parseCards(html.slice(start, next ? next.index : html.length), ctx);
+}
+
 function listURL(ctx, section, page) { return entryURL(ctx) + '/' + String(section.path || 'videos/recent').replace(/^\/+/, '') + (page > 1 ? '/page/' + page : ''); }
 function detailURL(ctx) { const direct = firstNonEmpty(ctx && ctx.detailUrl, ctx && ctx.url); if (/^https?:\/\//i.test(direct)) return direct; const id = firstNonEmpty(ctx && ctx.itemId, ctx && ctx.id, decodeVersionId(ctx && ctx.versionId).slug); return id ? entryURL(ctx) + '/video/cid/' + encodeURIComponent(String(id).replace(/^.*\//, '')) : ''; }
 function entryURL(ctx) { return baseURL(ctx) + MADOU8_ENTRY; }
 function baseURL(ctx) { const raw = contextValue(normalizeContext(ctx), 'baseUrl') || MADOU8_DEFAULT_BASE; return String(raw).replace(/\/+$/, ''); }
 function categoryAction(s) { return { type: 'category', pageId: s.id, title: s.title, path: s.path, itemAspectRatio: '16:9' }; }
-function categoryCard(s) { return { id: s.id, title: s.title, type: 'category', subtitle: '浏览' + s.title, action: categoryAction(s) }; }
+function categoryPreviewCard(s, items) {
+  const previews = (items || []).filter(function (item) { return item && (item.poster || item.backdrop); }).slice(0, 3);
+  if (!previews.length) return null;
+  const lead = previews[0];
+  return {
+    id: s.id, title: s.title, type: 'category', subtitle: '浏览' + s.title,
+    poster: lead.poster || lead.backdrop, backdrop: lead.backdrop || lead.poster,
+    imageHeaders: lead.imageHeaders, posterHeaders: lead.posterHeaders || lead.imageHeaders,
+    backdropHeaders: lead.backdropHeaders || lead.imageHeaders,
+    previewItems: previews, action: categoryAction(s)
+  };
+}
 function sectionShell(s) { return { id: s.id, title: s.title, style: s.style, lazy: true, moreAction: categoryAction(s), items: [] }; }
 function findSection(id) { id = String(id || ''); return SECTIONS.find(function (x) { return x.id === id || x.path === id; }); }
 function ranked(items) { return items.map(function (x, i) { const y = Object.assign({}, x); y.rank = i + 1; return y; }); }
@@ -313,6 +329,7 @@ function firstNonEmpty() { for (let i = 0; i < arguments.length; i++) if (argume
 function decodeHTML(s) { return String(s || '').replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&#(\d+);/g, function (_, n) { return String.fromCharCode(Number(n)); }); }
 function cleanText(s) { return decodeHTML(String(s || '').replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim(); }
 function cleanTitle(s) { return cleanText(s).replace(/^\s*麻豆视频\s*[|\-] */i, '').replace(/\s*[|\-] *麻豆视频\s*$/i, '').trim(); }
+function escapeRegExp(s) { return String(s || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 function positiveInt(v, fallback) { const n = Number(v); return isFinite(n) && n > 0 ? Math.floor(n) : fallback; }
 function unique(a) { return a.filter(function (x, i) { return x && a.indexOf(x) === i; }); }
 function uniqueBy(a, key) { const seen = {}; return a.filter(function (x) { const k = key(x); if (seen[k]) return false; seen[k] = true; return true; }); }
