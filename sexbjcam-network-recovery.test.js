@@ -27,14 +27,15 @@ global.Widget = {
   http: {
     get(url) {
       if (String(url).indexOf(detailURL) === 0) return detailHTML;
+      if (networkGood && String(url).indexOf(masterURL) === 0) return masterManifest;
       throw new Error('network unavailable');
     }
   },
   browser: {
     fetch(url) {
       if (!networkGood) throw new Error('network unavailable');
-      if (String(url).indexOf(embedURL) === 0) return '<script>const source="' + masterURL + '";</script>';
-      if (String(url).indexOf(masterURL) === 0) return masterManifest;
+      if (String(url).indexOf(embedURL) === 0) return { html: '<script>const source="' + masterURL + '";</script>', capturedRequests: [{ url: masterURL, requestHeaders: { Referer: embedURL, Origin: 'https://player.example', 'User-Agent': 'Fixture browser' } }] };
+      if (String(url).indexOf(masterURL) === 0) throw new Error('不得用浏览器导航读取 HLS 正文');
       throw new Error('unexpected browser URL: ' + url);
     }
   },
