@@ -123,12 +123,82 @@ test('MissAV does not invoke player/browser fallbacks after a complete master di
   const result = await c.resolvePlayback({ itemId: c.makeItemId('https://missav.ws/cn/a', 'A', '') });
   assert.equal(result.url, 'https://cdn.test/1080.m3u8'); assert.equal(linked, 0); assert.equal(browser, 0);
 });
-test('MissAV 1.5.10 accepts the original 1.0.7 detail payload and all legacy parameter names', () => {
+test('MissAV accepts the original 1.0.7 detail payload and all legacy parameter names', () => {
   const c = load('missav-mini-library-download-working 6.js');
   const old = 'missav://detail?url=https%3A%2F%2Fmissav.ws%2Fdm247%2Fcn%2Fsample&title=Old';
   assert.equal(c.detailUrlFromContext({ itemId: old }), 'https://missav.ws/dm247/cn/sample');
   const names = c.getManifest().parameters.map(p => p.name);
   for (const name of ['baseURL', 'entryPath', 'backupBaseURLs', 'enableBrowserFallback', 'browserVisible', 'requestTimeoutSeconds', 'cacheMinutes']) assert.ok(names.includes(name));
+});
+
+const missavFile = 'missav-mini-library-download-working 6.js';
+const missavPage = '<html><title>Sample - MissAV</title><body>' +
+  '<script>var source="https://cdn.test/playlist.m3u8";var source1920="https://cdn.test/1080p/video.m3u8";var source1280="https://cdn.test/720p/video.m3u8";</script>' +
+  '<script src="/cdn-cgi/challenge-platform/scripts/jsd/main.js"></script></body></html>';
+function missavInput(c) { return { itemId: c.makeItemId('https://missav.ws/cn/sample-001', 'Sample', '') }; }
+function acceleratedTimers() { return { setTimeout: (fn, ms) => setTimeout(fn, ms / 100) }; }
+
+test('MissAV HTTP 200 passive Cloudflare detection is not a blocking challenge', async () => {
+  const c = load(missavFile); const requests = []; let browser = 0;
+  c.Widget.http.get = async url => { requests.push(url); return { statusCode: 200, data: url.includes('.m3u8') ? master : missavPage }; };
+  c.Widget.browser = { async fetch() { browser++; throw new Error('browser must not be needed'); } };
+  const result = await c.resolvePlayback(missavInput(c));
+  assert.equal(result.url, 'https://cdn.test/1080.m3u8');
+  assert.equal(browser, 0);
+  assert.deepEqual(requests, ['https://missav.ws/cn/sample-001', 'https://cdn.test/playlist.m3u8']);
+  assert.equal(c.isCloudflare(missavPage, 200, { server: 'cloudflare' }), false);
+  for (const [html, status, headers] of [
+    ['<html><title>Just a moment...</title><body>Verify you are human</body></html>', 200, {}],
+    [missavPage, 200, { 'Cf-Mitigated': 'challenge' }], [missavPage, 403, {}]
+  ]) assert.equal(c.isUsableHTML(html, status, headers), false);
+});
+test('MissAV uses its one browser call for media capture after a real challenge', async () => {
+  const c = load(missavFile); const browserCalls = [], requests = [];
+  c.Widget.http.get = async url => { requests.push(url); return { statusCode: 200, data: url.includes('.m3u8') ? master : '<html><title>Just a moment...</title><body>Enable JavaScript and cookies to continue</body></html>' }; };
+  c.Widget.browser = { async fetch(url, options) { browserCalls.push({ url, options }); return { mediaSources: [{ url: 'https://cdn.test/playlist.m3u8' }] }; } };
+  assert.equal((await c.resolvePlayback(missavInput(c))).url, 'https://cdn.test/1080.m3u8');
+  assert.equal(browserCalls.length, 1); assert.equal(browserCalls[0].options.captureMedia, true);
+  assert.equal(browserCalls[0].options.visible, false); assert.equal(requests.length, 2);
+});
+test('MissAV a host that ignores HTTP timeout still reaches media capture before the total deadline', async () => {
+  const c = load(missavFile, acceleratedTimers()); let browser = 0, requests = 0;
+  c.Widget.http.get = async url => { requests++; return url.includes('.m3u8') ? { status: 200, data: master } : new Promise(() => {}); };
+  c.Widget.browser = { async fetch() { browser++; return { mediaSources: [{ url: 'https://cdn.test/playlist.m3u8' }] }; } };
+  assert.equal((await c.resolvePlayback(missavInput(c))).url, 'https://cdn.test/1080.m3u8');
+  assert.equal(browser, 1); assert.equal(requests, 2);
+});
+test('MissAV a hung browser reports the failing media stage without retrying mirrors', async () => {
+  const c = load(missavFile, acceleratedTimers()); let browser = 0, requests = 0;
+  c.Widget.http.get = async () => { requests++; throw new Error('offline'); };
+  c.Widget.browser = { async fetch() { browser++; return new Promise(() => {}); } };
+  await assert.rejects(c.resolvePlayback(missavInput(c)), error => /stage=browser-media/.test(error.message) && !/total-deadline/.test(error.message));
+  assert.equal(browser, 1); assert.equal(requests, 1);
+});
+test('MissAV a hung optional master probe hands off the highest HTML quality without another browser', async () => {
+  const c = load(missavFile, acceleratedTimers()); let browser = 0;
+  c.Widget.http.get = async url => url.includes('.m3u8') ? new Promise(() => {}) : { status: 200, data: missavPage };
+  c.Widget.browser = { async fetch() { browser++; return new Promise(() => {}); } };
+  assert.equal((await c.resolvePlayback(missavInput(c))).url, 'https://cdn.test/1080p/video.m3u8');
+  assert.equal(browser, 0);
+});
+test('MissAV playback refreshes detail HTML instead of using cached signed source URLs', async () => {
+  const c = load(missavFile); let refreshes = 0;
+  c.setCachedText({}, 'https://missav.ws/cn/sample-001', missavPage);
+  c.Widget.http.get = async url => { if (url.includes('.m3u8')) return { status: 200, data: media }; refreshes++; return { status: 200, data: missavPage.replaceAll('https://cdn.test/', 'https://fresh.test/' + refreshes + '/') }; };
+  assert.equal((await c.resolvePlayback(missavInput(c))).url, 'https://fresh.test/1/1080p/video.m3u8');
+  assert.equal((await c.resolvePlayback(missavInput(c))).url, 'https://fresh.test/2/1080p/video.m3u8');
+  assert.equal(refreshes, 2);
+});
+test('MissAV optional master discovery reserves time to hand off an already discovered stream', async () => {
+  let offset = 0, masterTimeout;
+  class PlaybackClock extends Date { static now() { return Date.now() + offset; } }
+  const c = load(missavFile, { ...acceleratedTimers(), Date: PlaybackClock });
+  c.Widget.http.get = async (url, options) => {
+    if (url.includes('.m3u8')) { masterTimeout = options.timeoutSeconds; return new Promise(() => {}); }
+    offset = 26500; return { status: 200, data: missavPage };
+  };
+  assert.equal((await c.resolvePlayback(missavInput(c))).url, 'https://cdn.test/1080p/video.m3u8');
+  assert.ok(masterTimeout > 0 && masterTimeout <= 1);
 });
 test('MissAV resource discovery failure does not become a fake playable webpage', async () => {
   const c = load('missav-mini-library-download-working 6.js');
@@ -174,6 +244,74 @@ test('ASMRLIB category previews come from their own category and load after home
   const requested = []; c.getCategory = async ({ pageId }) => { requested.push(pageId); return { items: [0,1,2].map(i => ({ id: `${pageId}-${i}`, poster: `https://img.test/${pageId}-${i}.jpg` })) }; };
   const section = await c.getHomeSection({ sectionId: 'categories' }); assert.ok(requested.length >= 3);
   assert.ok(section.items.every(x => x.previewItems[0].id.startsWith(x.action.pageId + '-')));
+});
+const asmrPost = 'becd2651e7d56ca656d27766d036dcee';
+const asmrCurrentPage = '<html><h1>ASMR sample</h1><div id="players"><button data-url="https://bysetayico.com/e/current">BI</button><button data-url="https://abyssplayer.com/current">AB</button></div><div id="downloads"></div></html>';
+test('ASMRLIB current embedded players expose one interactive page action consistently', async () => {
+  const c = load('asmrlib-mini-library.js');
+  c.Widget.http.get = async () => ({ status: 200, data: asmrCurrentPage });
+  const input = { itemId: 'asmrlib://post/' + asmrPost };
+  const detail = await c.getDetail(input), groups = await c.getResourceVersions(input);
+  assert.deepEqual(plain(groups), plain(detail.resourceGroups));
+  const versions = groups[0].versions;
+  assert.equal(versions.length, 1); assert.equal(versions[0].default, true);
+  assert.equal(versions[0].action.itemId, input.itemId);
+  assert.equal(c.asmrId(versions[0].action.versionId), asmrPost);
+  assert.match(versions[0].subtitle, /验证或播放/);
+});
+for (const player of ['https://bysetayico.com/e/old', 'https://abyssplayer.com/old']) {
+  test(`ASMRLIB legacy ${new URL(player).host} action preserves the original embedding page`, async () => {
+    const c = load('asmrlib-mini-library.js'); const calls = []; let http = 0;
+    c.Widget.http.get = async () => { http++; throw new Error('unnecessary detail refresh'); };
+    c.Widget.browser = { async fetch(url, options) { calls.push({ url, options }); return { mediaSources: [{ url: 'https://cdn.test/main.m3u8', requestHeaders: { referer: player, origin: new URL(player).origin } }] }; } };
+    const input = { itemId: 'asmrlib://post/' + asmrPost, versionId: 'asmrlib-line://old/' + encodeURIComponent(player) };
+    const result = await c.resolvePlayback(JSON.stringify(input));
+    assert.equal(result.url, 'https://cdn.test/main.m3u8'); assert.equal(result.container, 'm3u8');
+    assert.equal(calls.length, 1); assert.equal(http, 0);
+    assert.equal(calls[0].url, 'https://asmrlib.com/posts/' + asmrPost); assert.equal(calls[0].options.visible, true);
+    assert.equal(calls[0].options.waitForMediaSource, true);
+    assert.equal(calls[0].options.captureRequests, undefined); assert.equal(calls[0].options.captureMedia, undefined);
+    assert.equal(result.headers.Referer, player); assert.equal(result.headers.Origin, new URL(player).origin);
+  });
+}
+test('ASMRLIB page-version-only input uses captured media headers and not outer document headers', async () => {
+  const c = load('asmrlib-mini-library.js');
+  c.Widget.browser = { async fetch() { return { headers: { Origin: 'https://outer.test' }, capturedRequests: [{ url: 'https://cdn.test/final.mp4', headers: { Referer: 'https://player.test/', Origin: 'https://player.test', Cookie: 'verified=sample', Connection: 'keep-alive' } }] }; } };
+  const result = await c.resolvePlayback({ versionId: 'asmrlib-page://post/' + asmrPost });
+  assert.equal(result.url, 'https://cdn.test/final.mp4'); assert.equal(result.headers.Origin, 'https://player.test');
+  assert.equal(result.headers.Cookie, 'verified=sample'); assert.equal(result.headers.Connection, undefined);
+});
+test('ASMRLIB refuses blob-only results and records capability evidence without retrying players', async () => {
+  const c = load('asmrlib-mini-library.js'); let calls = 0;
+  c.Widget.browser = { async fetch() { calls++; return { html: '<video src="blob:https://player.test/id"></video>', mediaSources: [{ url: 'blob:https://player.test/id' }] }; } };
+  await assert.rejects(c.resolvePlayback({ itemId: asmrPost }), error => /stage=page-media/.test(error.message) && /blobOnly=true/.test(error.message) && /keys=html,mediaSources/.test(error.message));
+  assert.equal(calls, 1);
+});
+test('ASMRLIB honors hidden-page preference and reports manual verification requirements', async () => {
+  const c = load('asmrlib-mini-library.js'); let visible;
+  c.Widget.browser = { async fetch(url, options) { visible = options.visible; return { html: '<p>点击播放按钮以验证你是真人</p>' }; } };
+  await assert.rejects(c.resolvePlayback({ itemId: asmrPost, params: { browserVisible: false } }), /stage=verification-required/);
+  assert.equal(visible, false); assert.equal(c.getManifest().parameters[0].defaultValue, true);
+});
+test('ASMRLIB bounds a hung host browser and preserves the stage without exposing native exceptions', async () => {
+  const c = load('asmrlib-mini-library.js', { setTimeout: (fn, ms) => setTimeout(fn, ms / 100) }); let calls = 0;
+  c.Widget.browser = { async fetch() { calls++; return new Promise(() => {}); } };
+  await assert.rejects(c.resolvePlayback({ itemId: asmrPost }), /stage=page-media/); assert.equal(calls, 1);
+  c.Widget.browser.fetch = async () => { throw new Error('Cookie=session-secret https://cdn.test/?token=secret'); };
+  await assert.rejects(c.resolvePlayback({ itemId: asmrPost }), error => /stage=page-media/.test(error.message) && !/secret/.test(error.message));
+});
+test('ASMRLIB old UP failure falls back once to the embedded page instead of skipping browser capture', async () => {
+  const c = load('asmrlib-mini-library.js', { $crypto: { aesDecrypt() { throw new Error('unsupported AES'); } } }); let browser = 0, timeout;
+  c.Widget.http.get = async (url, options) => { timeout = options.timeout; return { data: 'abcdef123456' }; };
+  c.Widget.browser = { async fetch(url) { browser++; assert.equal(url, 'https://asmrlib.com/posts/' + asmrPost); return { mediaURL: 'https://cdn.test/current.mp4' }; } };
+  const versionId = 'asmrlib-line://UP/' + encodeURIComponent('https://v.upn.one/#legacycode');
+  const result = await c.resolvePlayback({ itemId: asmrPost, versionId });
+  assert.equal(result.url, 'https://cdn.test/current.mp4'); assert.equal(browser, 1); assert.equal(timeout, 5);
+  assert.equal(result.headers.Origin, undefined); assert.equal(result.headers.Referer, undefined);
+});
+test('ASMRLIB retains direct media compatibility without requiring a browser', async () => {
+  const c = load('asmrlib-mini-library.js');
+  assert.equal((await c.resolvePlayback({ url: 'https://cdn.test/legacy.mp4' })).url, 'https://cdn.test/legacy.mp4');
 });
 test('Jable Forward adds sorting and page parameters once', async () => {
   const c = load('jable.js'); let captured;
@@ -256,4 +394,369 @@ test('XVideos attaches the configured session token without printing it', async 
   c.Widget.storage.getItem=async()=>token;
   const options=await vm.runInContext('widgetAPI.getDefaultOptions()',c);
   assert.equal(options.headers.Cookie,'session_token='+token); assert.ok(logs.every(line=>!line.includes(token)));
+});
+
+const madouCard = id => `<div class="streamit-video-card rounded-3" data-preview="https://img.test/preview.mp4"><a href="/asian/zh-CN/video/cid/${id}"><img src="https://img.test/${id}.jpg" alt="${id}"></a></div>`;
+const taoluPage = (id, source, preview = true) => `<h1>Film ${id}</h1><video id="player"></video>${preview ? '正在播放预览，VIP可免费观看完整视频' : ''}<script>const video_id = '${id}'; document.addEventListener('DOMContentLoaded', () => { const source = '${source}'; });</script><video data-src="https://img.test/snapshots/999.mp4"></video>`;
+
+test('KBJ unavailable home reports the source failure instead of successful empty media', async () => {
+  const c = load('kbjfan-mini-library.js'); c.Widget.http.get = async () => { throw new Error('connection closed'); };
+  await assert.rejects(c.getHome({}), /KBJFan 加载失败.*connection closed/);
+  const section = await c.getHomeSection({ sectionId: 'dance' }); assert.equal(section.items.length, 0); assert.match(section.error, /connection closed/);
+});
+test('KBJ rejects a repurposed domain redirect and does not invent a replacement', async () => {
+  const c = load('kbjfan-mini-library.js'); c.Widget.http.get = async () => ({ statusCode: 200, finalURL: 'https://other.test/', data: '<h1>Other site</h1>' });
+  await assert.rejects(c.getHome({}), /跳转到其他站点/);
+  c.Widget.http.get = async () => ({ statusCode: 403, data: '<html>Forbidden</html>' });
+  await assert.rejects(c.getHome({}), /HTTP 403/);
+});
+test('KBJ accepts request-only HTTP and nested response HTML while preserving old contexts', async () => {
+  const c = load('kbjfan-mini-library.js'); const calls = [];
+  c.Widget.http = { async request(options) { calls.push(options); return { statusCode: 200, body: { html: '<posts class="posts-item"><h2 class="item-heading"><a href="/film/">Film</a></h2><img data-src="/poster.jpg"></posts>' } }; } };
+  const home = await c.getHome(JSON.stringify({ params: JSON.stringify({ baseURL: 'https://kbj.test' }) }));
+  assert.equal(home.hero[0].id, 'https://kbj.test/film/'); assert.equal(calls[0].url, 'https://kbj.test/koreanbjdance/'); assert.equal(calls[0].browserFallback, false);
+});
+test('KBJ and Taolu bound a hung response body as well as their HTTP request', async () => {
+  for (const file of ['kbjfan-mini-library.js', 'taolusm-mini-library.js']) {
+    const c = load(file, { setTimeout: (fn, ms) => setTimeout(fn, Math.min(ms, 15)) });
+    c.Widget.http.get = async () => ({ statusCode: 200, text: () => new Promise(() => {}) });
+    await assert.rejects(c.fetchText({}, 'https://source.test/'), /超时/);
+  }
+});
+test('Madou first screen loads only recent media; category artwork remains lazy', async () => {
+  const c = load('madou8-mini-library 5.js'); const calls = [];
+  c.Widget.http.get = async url => { calls.push(url); return { statusCode: 200, body: { html: madouCard('first') } }; };
+  const home = await c.getHome(JSON.stringify({ params: JSON.stringify({ baseUrl: 'https://madou.test' }) }));
+  assert.deepEqual(calls, ['https://madou.test/asian/zh-CN/videos/recent']); assert.equal(home.hero[0].id, 'first');
+  assert.equal(home.sections[0].lazy, true); assert.equal(home.sections[1].items[0].rank, 1);
+});
+test('Madou page failures do not turn into successful empty home or fake qualities', async () => {
+  const c = load('madou8-mini-library 5.js'); c.Widget.http.get = async () => ({ statusCode: 403, data: '<h1>Forbidden</h1>' });
+  await assert.rejects(c.getHome({}), /HTTP 403/);
+  c.Widget.http.get = async () => ({ statusCode: 200, data: '<html>No cards</html>' });
+  await assert.rejects(c.getHome({}), /未收到影片列表/);
+  c.fetchStreamInfo = async () => ({ playlist: [{ url: 'https://invalid.test/stream.m3u8' }] }); c.fetchHlsText = async () => { throw new Error('HTTP 403'); };
+  await assert.rejects(c.buildPlaybackGroups({}, 'https://madou.test/detail', 'uid', 'Film'), /没有可验证/);
+});
+test('Madou one challenged page can return native browser HTML without media capture or retry stacks', async () => {
+  const c = load('madou8-mini-library 5.js'); let browsers = 0;
+  c.Widget.http.get = async () => ({ statusCode: 403, data: '<title>Just a moment</title>' });
+  c.Widget.browser = { async fetch(url, options) { browsers++; assert.equal(options.visible, false); assert.equal(options.waitForMediaSource, undefined); return { html: madouCard('verified') }; } };
+  const home = await c.getHome({}); assert.equal(home.hero[0].id, 'verified'); assert.equal(browsers, 1);
+  await assert.rejects(c.fetchHlsText({}, 'https://cdn.test/master.m3u8', 'https://madou.test/'), /HTTP 403/); assert.equal(browsers, 1);
+});
+test('Madou relative cards and signed HLS paths round-trip without URL global', () => {
+  const c = load('madou8-mini-library 5.js', { URL: undefined });
+  const items = c.parseCards(madouCard('film'), {});
+  assert.equal(items[0].action.detailUrl, 'https://madou8.pw/asian/zh-CN/video/cid/film');
+  assert.equal(c.resolveURL('../720/video.m3u8?sig=a/b#part', 'https://cdn.test/token/master.m3u8'), 'https://cdn.test/720/video.m3u8?sig=a/b#part');
+});
+test('Madou evaluates a working line beyond the old first-four limit and skips web-only schemes', async () => {
+  const c = load('madou8-mini-library 5.js'); const calls = [];
+  const playlist = Array.from({length: 5}, (_, i) => ({ url: `https://cdn.test/${i}/master.m3u8` }));
+  playlist.unshift({ url: 'https://enc.test/stream.m3u8', playMode: 'streampipe' }, { url: 'https://web.test/stream.m3u8', native: false });
+  c.fetchHlsText = async (ctx, url) => { calls.push(url); if (url.includes('/4/')) return url.endsWith('master.m3u8') ? master : media; throw new Error('HTTP 403'); };
+  const chosen = await c.chooseStream({}, playlist, 1080, 'https://madou.test/detail');
+  assert.equal(chosen.height, 1080); assert.match(chosen.url, /\/4\/1080.m3u8/); assert.ok(!calls.some(url => /enc.test|web.test/.test(url)));
+});
+test('Madou retains public player Accept-sign headers for master, variant and native playback', async () => {
+  const c = load('madou8-mini-library 5.js'); const calls = [];
+  c.Widget.http.get = async (url, options) => { calls.push({url, headers: options.headers}); return {statusCode:200,data:url.endsWith('master.m3u8') ? master : media}; };
+  const chosen = await c.chooseStream({}, [{url:'https://cdn.test/master.m3u8',urlSign:'opaque normal value'}], 720, 'https://madou.test/detail');
+  assert.equal(chosen.height, 720); assert.equal(chosen.headers.Accept, '*/*;sign=opaque%20normal%20value');
+  assert.ok(calls.every(x => x.headers.Accept === chosen.headers.Accept)); assert.equal(chosen.headers.Origin, undefined);
+  const q = await c.discoverVariants({}, [{url:'https://cdn.test/master.m3u8',urlSign:'private-now'}], 'https://madou.test/detail');
+  assert.ok(!JSON.stringify(q).includes('private-now'));
+});
+test('Madou original media playlists expose honest original quality and refresh before every play', async () => {
+  const c = load('madou8-mini-library 5.js'); let api = 0;
+  c.Widget.http.get = async url => ({statusCode:200,data:url.includes('/api/video/stream') ? JSON.stringify({playlist:[{url:`https://cdn.test/stream.m3u8?fresh=${++api}`,urlSign:`now-${api}`} ]}) : media});
+  const detail = 'https://madou8.pw/asian/zh-CN/video/cid/film';
+  const groups = await c.buildPlaybackGroups(c.madouContext({}), detail, 'uid', 'Film');
+  assert.equal(groups[0].versions[0].name, '原始画质'); assert.ok(!JSON.stringify(groups).includes('now-'));
+  const action = groups[0].versions[0].action;
+  for (const height of [0, 720, 0]) {
+    const result = await c.resolvePlayback(JSON.stringify({...action,qualityId:height,url:'https://expired.test/file.m3u8'}));
+    assert.match(result.url, new RegExp(`fresh=${api}$`)); assert.equal(result.headers.Accept, `*/*;sign=now-${api}`);
+  }
+  assert.equal(api, 4);
+});
+test('Madou media discovery caps concurrency and the overall deadline when native requests hang', async () => {
+  const c = load('madou8-mini-library 5.js', {setTimeout:(fn,ms)=>setTimeout(fn,Math.min(ms,20))}); let active=0,max=0;
+  c.Widget.http.get = async () => { active++; max=Math.max(max,active); return new Promise(()=>{}); };
+  const playlist=Array.from({length:9},(_,i)=>({url:`https://cdn.test/${i}/master.m3u8`}));
+  const start=Date.now(); await assert.rejects(c.chooseStream({__deadline:Date.now()+25},playlist,0,'https://madou.test/detail'), /stage=/);
+  assert.ok(Date.now()-start<150); assert.ok(max<=6); // timed-out native calls cannot be cancelled; logical workers remain three
+});
+test('Taolu detail and versions identify public previews, not download/login pages or recommendations', async () => {
+  const c=load('taolusm-mini-library.js'); const calls=[];
+  c.Widget.http.get=async url=>{calls.push(url);return {statusCode:200,data:taoluPage('121576','https://tl.test/preview_mp4/121576.mp4')};};
+  const detail=await c.getDetail({itemId:'121576'}); const version=detail.resourceGroups[0].versions[0];
+  assert.equal(version.name,'公开预览（非完整影片）'); assert.equal(version.url,undefined); assert.match(detail.overview,/完整影片需要/);
+  const result=await c.resolvePlayback(JSON.stringify(version.action)); assert.equal(result.url,'https://tl.test/preview_mp4/121576.mp4'); assert.equal(result.container,'mp4'); assert.equal(result.headers.Origin,undefined);
+  assert.ok(calls.every(url=>url.endsWith('/v/121576'))); assert.equal(c.parsePlaybackSource(taoluPage('other','https://tl.test/preview_mp4/other.mp4'),'121576').url,'');
+});
+test('Taolu old complete/download choices report access requirements instead of silently substituting previews', async () => {
+  const c=load('taolusm-mini-library.js');c.Widget.http.get=async()=>({statusCode:200,data:taoluPage('121576','https://tl.test/preview_mp4/121576.mp4')});
+  await assert.rejects(c.resolvePlayback({versionId:'download-121576'}),/旧下载线路需要/);
+  await assert.rejects(c.resolvePlayback({url:'https://taolusm.com/download/121576'}),/旧下载线路需要/);
+  assert.equal(c.itemIdFromContext({itemId:'https://taolusm.com/v/121576?year=2026'}),'121576');
+});
+test('Taolu missing source, HTTP errors and login redirects never become MP4 playback results', async () => {
+  const c=load('taolusm-mini-library.js');
+  for(const response of [{statusCode:200,data:'<video data-src="https://tl.test/snapshots/999.mp4"></video>'},{statusCode:403,data:'Forbidden'},{statusCode:200,finalURL:'https://taolusm.com/login',data:'Login'}]) {
+    c.Widget.http.get=async()=>response;
+    await assert.rejects(c.resolvePlayback({itemId:'121576'}),/未提供|HTTP 403|需要站点登录/);
+  }
+});
+
+test('Madou history refresh ignores an old media URL when only stable item/version is present', async () => {
+  const c=load('madou8-mini-library 5.js');const version=c.encodeVersionId({url:'https://madou8.pw/asian/zh-CN/video/cid/film',uid:'uid',height:720});
+  assert.equal(c.detailURL({itemId:'film',url:'https://expired.test/stream.m3u8'}),'https://madou8.pw/asian/zh-CN/video/cid/film');
+  assert.equal(c.detailURL({versionId:version,url:'https://expired.test/stream.m3u8'}),'https://madou8.pw/asian/zh-CN/video/cid/film');
+});
+test('Madou native response body timeouts and logical media concurrency remain bounded', async () => {
+  const c=load('madou8-mini-library 5.js',{setTimeout:(fn,ms)=>setTimeout(fn,Math.min(ms,15))});
+  c.Widget.http.get=async()=>({statusCode:200,text:()=>new Promise(()=>{})});
+  await assert.rejects(c.getHome({}),/stage=page-http/);
+  let active=0,max=0;
+  const results=await c.madouMap([1,2,3,4,5,6,7],3,async value=>{active++;max=Math.max(max,active);await new Promise(resolve=>setTimeout(resolve,3));active--;return value;});
+  assert.deepEqual(plain(results),[1,2,3,4,5,6,7]);assert.equal(max,3);
+});
+test('KBJ unrelated HTML cannot create fake playable lines or successful first categories', async () => {
+  const c=load('kbjfan-mini-library.js');c.Widget.http.get=async()=>({statusCode:200,data:'<title>Other site</title>'});
+  await assert.rejects(c.getCategory({pageId:'dance'}),/没有原站影片/);
+  const detail=await c.getDetail({itemId:'https://www.kbjfan.com/old-film/'});assert.equal(detail.resourceGroups.length,0);
+  await assert.rejects(c.getResourceVersions({itemId:'https://www.kbjfan.com/old-film/'}),/没有可播放媒体/);
+});
+
+function javggDetail(lines = ['VH', 'playmate', 'luluvdoo', 'SW']) {
+  return '<div id="dooplay_player_content"><ul>' + lines.map((line, i) =>
+    `<li data-nume="${i + 1}" data-post="579441" class="dooplay_player_option"><span class="title">Server</span><span class="server">${line}</span></li>`).join('') + '</ul>' + lines.map((line, i) =>
+    `<div class="source-box" id="source-player-${i + 1}"><div class="pframe"><iframe src="https://player${i + 1}.test/e/film"></iframe></div></div>`).join('') + '</div>';
+}
+function packedJavgg(host = 'cdn', file = 'master', signature = 'fresh') {
+  return `eval(function(p,a,c,k,e,d){return p;}('0({1:[{2:"3://4.5/6.7?8=9"}]});',36,10,'setup|sources|file|https|${host}|test|${file}|m3u8|sign|${signature}'.split('|'),0,{}))`;
+}
+
+test('JAVGG maps real server labels to numbered frames, despite missing/reordered frames', () => {
+  const c = load('javgg-mini-library.js');
+  const source = javggDetail().replace(/<div class="source-box" id="source-player-1">[\s\S]*?<\/div><\/div>/, '');
+  const players = c.parsePlayers(source);
+  assert.deepEqual(plain(players.map(x => [x.lineId, x.line])), [['2','playmate'],['3','luluvdoo'],['4','SW']]);
+  assert.equal(players[0].url, 'https://player2.test/e/film');
+  const groups = players.map(x => c.qualityGroup('https://javgg.net/jav/a/', 'A', x, [{name:'720p',height:720}]));
+  assert.equal(new Set(groups.map(x => x.id)).size, 3);
+});
+
+test('JAVGG discovers packed HLS qualities while hung and empty players fail independently', async () => {
+  const c = load('javgg-mini-library.js', { setTimeout: (fn, ms) => setTimeout(fn, ms / 100) });
+  let active = 0, max = 0, browsers = 0;
+  c.Widget.browser = { async fetch() { browsers++; throw new Error('should not be needed'); } };
+  c.Widget.http.get = async url => {
+    if (url.includes('/jav/')) return {statusCode:200,data:javggDetail()};
+    if (url.includes('player1')) return new Promise(() => {});
+    active++; max = Math.max(active, max); await Promise.resolve(); active--;
+    if (url.includes('player2')) return {statusCode:200,data:'<html>dynamic player</html>'};
+    if (url.includes('player3')) return {statusCode:200,data:packedJavgg('lulu')};
+    if (url.includes('player4')) return {statusCode:200,data:packedJavgg('sw')};
+    return {statusCode:200,data:url.includes('lulu') ? master.split('#EXT-X-STREAM-INF:BANDWIDTH=900000')[0] : master};
+  };
+  const groups = await c.getResourceVersions(JSON.stringify({detailUrl:'https://javgg.net/jav/a/'}));
+  assert.deepEqual(plain(groups.map(x => x.title)), ['luluvdoo 线路','SW 线路']);
+  assert.deepEqual(plain(groups[1].versions.map(x => x.name)), ['1080p','720p']);
+  assert.equal(groups[1].versions.filter(x => x.default).length, 1);
+  assert.equal(browsers, 0); assert.ok(max <= 2);
+  const payload = c.decodePayload(groups[1].versions[1].id);
+  assert.equal(payload.height,720); assert.equal(payload.lineId,'4'); assert.equal(payload.playerUrl,'https://player4.test/e/film');
+  assert.ok(!groups[1].versions[0].id.includes('sign'));
+});
+
+test('JAVGG refreshes signed packed URLs and selects highest / requested / missing quality', async () => {
+  const c = load('javgg-mini-library.js'); let refreshes = 0;
+  c.Widget.http.get = async url => url.includes('player.test') ? {status:200,data:packedJavgg('cdn','master','fresh'+(++refreshes))} : {status:200,data:master};
+  for (const height of [0,720,2160,1080]) {
+    const result = await c.resolvePlayback({versionId:c.encodePayload({kind:'play',detailUrl:'https://javgg.net/jav/a/',playerUrl:'https://player.test/e/a',line:'Server',height})});
+    assert.equal(result.url, 'https://cdn.test/' + (height === 720 ? '720' : '1080') + '.m3u8');
+  }
+  assert.equal(refreshes,4);
+});
+
+test('JAVGG does not execute packed scripts or accept unbounded packing dictionaries', () => {
+  const c = load('javgg-mini-library.js');
+  assert.equal(c.extractPlayableURL(packedJavgg()),'https://cdn.test/master.m3u8?sign=fresh');
+  assert.equal(c.extractPlayableURL(packedJavgg().replace('return p;', 'globalThis.compromised=true;return p;')),'https://cdn.test/master.m3u8?sign=fresh');
+  assert.equal(c.compromised,undefined);
+  assert.equal(c.extractPlayableURL(packedJavgg().replace(',36,10,', ',36,200000,')), '');
+});
+
+test('JAVGG rejects expired 404 manifests, retries fresh discovery, and leaves detail resources empty', async () => {
+  const c = load('javgg-mini-library.js'); let available = false;
+  c.Widget.http.get = async url => url.includes('/jav/') ? {status:200,data:javggDetail(['SW'])} : url.includes('player1') ? {status:200,data:packedJavgg()} : {statusCode:available ? 200 : 404,data:available ? media : '<html>Not Found</html>'};
+  const ctx={detailUrl:'https://javgg.net/jav/a/'};
+  assert.equal((await c.getDetail(ctx)).resourceGroups.length,0);
+  await assert.rejects(c.getResourceVersions(ctx), /manifest-http-404/);
+  available=true;
+  const groups=await c.getResourceVersions(ctx);assert.equal(groups[0].versions[0].name,'HLS 原始画质');
+});
+
+test('JAVGG captures real browser request headers once, then resolves a lower quality', async () => {
+  const c=load('javgg-mini-library.js'); let browsers=0; const manifestHeaders=[];
+  c.Widget.http.get=async (url, options)=>{
+    if(url.includes('/jav/')) return {status:200,data:javggDetail(['playmate'])};
+    if(url.includes('player1')) return {status:200,data:'<html>dynamic</html>'};
+    manifestHeaders.push(options.headers);return {status:200,data:master};
+  };
+  c.Widget.browser={async fetch(url,options){browsers++;assert.equal(options.visible,false);assert.equal(options.waitForAny,undefined);assert.ok(options.timeout<=10);return {capturedRequests:[{url:'https://cdn.test/master.m3u8?fresh=1',requestHeaders:{referer:'https://actual-player.test/',origin:'https://actual-player.test','user-agent':'Actual Agent',cookie:'fixture-only','Authorization':'must-not-forward'}}]};}};
+  const groups=await c.getResourceVersions({detailUrl:'https://javgg.net/jav/a/'});
+  const result=await c.resolvePlayback(groups[0].versions[1].action);
+  assert.equal(result.url,'https://cdn.test/720.m3u8');assert.equal(browsers,2);
+  assert.deepEqual(plain(result.headers),{'User-Agent':'Actual Agent',Referer:'https://actual-player.test/',Origin:'https://actual-player.test',Cookie:'fixture-only'});
+  assert.ok(manifestHeaders.every(h=>h.Referer==='https://actual-player.test/'));
+});
+
+test('JAVGG bounds a hung native browser and identifies capture failure without exposing tokens', async () => {
+  const c=load('javgg-mini-library.js',{setTimeout:(fn,ms)=>setTimeout(fn,ms/100)});let browsers=0;
+  c.Widget.http.get=async url=>({status:200,data:url.includes('/jav/')?javggDetail(): '<html>dynamic</html>'});
+  c.Widget.browser={async fetch(){browsers++;return new Promise(()=>{});}};
+  const start=Date.now();await assert.rejects(c.getResourceVersions({detailUrl:'https://javgg.net/jav/a/'}),/browser-media-timeout/);
+  assert.equal(browsers,1);assert.ok(Date.now()-start<500);
+  c.Widget.browser.fetch=async()=>({mediaSources:['blob:https://player.test/id'],secret:'must-not-leak'});
+  await assert.rejects(c.resolvePlayback({playerUrl:'https://player.test/e/a'}),e=>/browser-.*media|browser-blob/.test(e.message)&&!e.message.includes('must-not-leak'));
+});
+
+test('JAVGG quality discovery itself has an overall deadline', async () => {
+  const c=load('javgg-mini-library.js',{setTimeout:fn=>setTimeout(fn,15)});
+  c.discoverResourceVersions=async()=>new Promise(()=>{});
+  await assert.rejects(c.getResourceVersions({}),/画质发现超时.*total-deadline/);
+});
+
+test('JAVGG direct detail Play explores later lines and selects the highest real quality', async () => {
+  const c=load('javgg-mini-library.js');
+  c.Widget.http.get=async url=>{
+    if(url.includes('/jav/')) return {status:200,data:javggDetail(['luluvdoo','SW'])};
+    if(url.includes('player1')) return {status:200,data:packedJavgg('low')};
+    if(url.includes('player2')) return {status:200,data:packedJavgg('high')};
+    return {status:200,data:url.includes('low')?master.replace(/1920x1080/g,'1280x720').replace(/1080.m3u8/g,'720.m3u8'):master};
+  };
+  const result=await c.resolvePlayback({itemId:c.encodePayload({kind:'detail',detailUrl:'https://javgg.net/jav/a/'})});
+  assert.equal(result.url,'https://high.test/1080.m3u8');
+});
+
+test('JAVGG playback fails explicitly when a fresh manifest is permanently unavailable', async () => {
+  const c=load('javgg-mini-library.js');
+  c.Widget.http.get=async url=>url.includes('player.test')?{status:200,data:packedJavgg()}:{statusCode:404,data:'Not Found'};
+  await assert.rejects(c.resolvePlayback({playerUrl:'https://player.test/e/a'}),/manifest-http-404/);
+});
+
+test('JAVGG uses observed luluvdoo headers and does not invent headers for other players', () => {
+  const c=load('javgg-mini-library.js');
+  const known=c.playbackHeaders('https://luluvdoo.com/e/film');
+  assert.equal(known.Referer,'https://luluvdoo.com/');assert.equal(known.Origin,'https://luluvdoo.com');
+  const other=c.playbackHeaders('https://javstreamhq.xyz/e/film');
+  assert.equal(other.Origin,undefined);assert.equal(other.Referer,undefined);
+});
+
+const sexDetailURL='https://sexbjcam.com/2026/09/30/sample/';
+const sexEmbedURL='https://player.test/embed/sample';
+const sexDetailHTML='<article itemtype="https://schema.org/VideoObject"><span itemprop="author"><meta itemprop="name" content="Uploader"></span><h1>Film title</h1><meta itemprop="embedUrl" content="'+sexEmbedURL+'"></article>';
+function packedSexPlayer(token='fresh') {
+  return `eval(function(p,a,c,k,e,d){return p;}('0="1://2.3/4.5?6=7";',36,8,'source|https|cdn|test|master|m3u8|token|${token}'.split('|'),0,{}))`;
+}
+
+test('SexBJCam reads the film title rather than nested uploader metadata', () => {
+  const c=load('sexbjcam-mini-library.js');
+  const detail=c.parseDetailHtml({},sexDetailHTML,sexDetailURL);
+  assert.equal(detail.title,'Film title');assert.equal(detail.embedURL,sexEmbedURL);
+});
+
+test('SexBJCam static packed playback avoids a hung browser and refreshes every selection', async () => {
+  const c=load('sexbjcam-mini-library.js');let browsers=0,players=0;const urls=[];
+  c.Widget.browser={async fetch(){browsers++;return new Promise(()=>{});}};
+  c.Widget.http.get=async (url,options)=>{urls.push(url);assert.equal(options.browserFallback,false);return {statusCode:200,data:url.includes('player.test')?packedSexPlayer('fresh'+(++players)):master};};
+  for(const [id,expected] of [[sexDetailURL,1080],['quality:720',720],['quality:1080',1080],['quality:540',1080]]) {
+    const result=await c.resolvePlayback(JSON.stringify({itemId:sexDetailURL,embedURL:sexEmbedURL,versionId:id}));
+    assert.equal(result.url,'https://cdn.test/'+expected+'.m3u8');
+  }
+  assert.equal(browsers,0);assert.equal(players,4);
+  assert.ok(urls.filter(x=>x.includes('cdn.test')).every(x=>!x.includes('_dreamby_refresh')));
+});
+
+test('SexBJCam hung native HTTP falls back once and preserves captured media headers', async () => {
+  const c=load('sexbjcam-mini-library.js',{setTimeout:(fn,ms)=>setTimeout(fn,ms/100)});let browsers=0;
+  c.Widget.http.get=async (url,options)=>{
+    if(url.includes('player.test'))return new Promise(()=>{});
+    assert.equal(options.headers.Referer,'https://actual-player.test/');return {status:200,data:master};
+  };
+  c.Widget.browser={async fetch(url,options){browsers++;assert.ok(options.timeout<=12);assert.equal(options.waitForAny,undefined);return {capturedRequests:[{url:'https://cdn.test/master.m3u8?token=device',requestHeaders:{referer:'https://actual-player.test/',origin:'https://actual-player.test','user-agent':'Device Agent',cookie:'fixture-cookie',Authorization:'must-not-copy'}}]};}};
+  const result=await c.resolvePlayback({itemId:sexDetailURL,embedURL:sexEmbedURL,versionId:'quality:720'});
+  assert.equal(result.url,'https://cdn.test/720.m3u8');assert.equal(browsers,1);
+  assert.deepEqual(plain(result.headers),{'User-Agent':'Device Agent',Referer:'https://actual-player.test/',Origin:'https://actual-player.test',Cookie:'fixture-cookie'});
+});
+
+test('SexBJCam hung native browser reports its own stage instead of the overall deadline', async () => {
+  const c=load('sexbjcam-mini-library.js',{setTimeout:(fn,ms)=>setTimeout(fn,ms/100)});let browsers=0;
+  c.Widget.http.get=async()=>({statusCode:503,data:'unavailable'});
+  c.Widget.browser={async fetch(){browsers++;return new Promise(()=>{});}};
+  const start=Date.now();await assert.rejects(c.resolvePlayback({embedURL:sexEmbedURL}),/browser-media-timeout/);
+  assert.equal(browsers,1);assert.ok(Date.now()-start<500);
+});
+
+test('SexBJCam stalled quality probe preserves a fresh media URL but creates no fake resource', async () => {
+  const c=load('sexbjcam-mini-library.js',{setTimeout:(fn,ms)=>setTimeout(fn,ms/100)});
+  c.Widget.http.get=async url=>url.includes('/2026/')?{status:200,data:sexDetailHTML}:url.includes('player.test')?{status:200,data:packedSexPlayer()}:new Promise(()=>{});
+  const result=await c.resolvePlayback({itemId:sexDetailURL,embedURL:sexEmbedURL});
+  assert.equal(result.url,'https://cdn.test/master.m3u8?token=fresh');
+  const detail=await c.getDetail({itemId:sexDetailURL});assert.equal(detail.resourceGroups.length,0);
+  await assert.rejects(c.getResourceVersions({itemId:sexDetailURL,embedURL:sexEmbedURL}),/manifest-http-timeout/);
+});
+
+test('SexBJCam variant-only capture keeps its URL and exposes honest original HLS quality', async () => {
+  const c=load('sexbjcam-mini-library.js');const variant='https://cdn.test/index-f3-v1-a1.m3u8?token=exact';
+  c.Widget.http.get=async url=>url.includes('player.test')?{status:200,data:'dynamic player'}:{status:200,data:media};
+  c.Widget.browser={async fetch(){return {capturedRequests:[{url:variant,requestHeaders:{Referer:'https://actual-player.test/'}}]};}};
+  assert.equal(c.mediaURLFromBrowserResult({capturedRequests:[{url:variant}]}),variant);
+  const groups=await c.getResourceVersions({itemId:sexDetailURL,embedURL:sexEmbedURL});
+  assert.equal(groups.groups[0].versions[0].name,'HLS 原始画质');assert.equal(groups.groups[0].versions[0].id,'quality:original');
+  const result=await c.resolvePlayback(groups.groups[0].versions[0].action);assert.equal(result.url,variant);
+});
+
+test('SexBJCam metadata cache never stores signed URLs or media request credentials', async () => {
+  const c=load('sexbjcam-mini-library.js');const stored=[];
+  c.Widget.storage={get(){return null},set(key,value){stored.push(value)}};
+  c.Widget.http.get=async url=>url.includes('player.test')?{status:200,data:'dynamic player'}:{status:200,data:master};
+  c.Widget.browser={async fetch(){return {capturedRequests:[{url:'https://cdn.test/master.m3u8?token=ephemeral',requestHeaders:{Cookie:'private-fixture',Origin:'https://actual-player.test'}}]};}};
+  const groups=await c.getResourceVersions({itemId:sexDetailURL,embedURL:sexEmbedURL});
+  assert.deepEqual(plain(groups.groups[0].versions.map(x=>x.name)),['1080P','720P']);
+  const serialized=JSON.stringify(stored)+JSON.stringify(groups);
+  assert.ok(!serialized.includes('ephemeral'));assert.ok(!serialized.includes('private-fixture'));
+});
+
+test('SexBJCam rejects permanent manifest errors and can retry the same item after recovery', async () => {
+  const c=load('sexbjcam-mini-library.js');let status=404;
+  c.Widget.http.get=async url=>url.includes('player.test')?{status:200,data:packedSexPlayer()}:{statusCode:status,data:status===200?master:'Not Found'};
+  const ctx={itemId:sexDetailURL,embedURL:sexEmbedURL};
+  await assert.rejects(c.resolvePlayback(ctx),/manifest-http-404/);
+  await assert.rejects(c.getResourceVersions(ctx),/manifest-http-404/);
+  status=200;assert.equal((await c.getResourceVersions(ctx)).groups[0].versions[0].name,'1080P');
+});
+
+test('SexBJCam browser failures distinguish blob-only results without leaking response values', async () => {
+  const c=load('sexbjcam-mini-library.js');c.Widget.http.get=async()=>({status:200,data:'dynamic'});
+  c.Widget.browser={async fetch(){return {mediaSources:['blob:https://player.test/id'],secret:'must-not-leak'};}};
+  await assert.rejects(c.resolvePlayback({embedURL:sexEmbedURL}),error=>/browser-blob-only/.test(error.message)&&!error.message.includes('must-not-leak'));
+});
+
+for(const [entry,operation,label] of [['getDetail','getDetailWithinBudget','详情加载'],['getResourceVersions','getResourceVersionsWithinBudget','画质发现']]) {
+  test(`SexBJCam ${entry} has an overall deadline`,async()=>{
+    const c=load('sexbjcam-mini-library.js',{setTimeout:fn=>setTimeout(fn,15)});c[operation]=async()=>new Promise(()=>{});
+    await assert.rejects(c[entry]({}),new RegExp(label+'超时.*total-deadline'));
+  });
+}
+
+test('SexBJCam rejects an empty HLS response rather than returning a fake playable URL', async () => {
+  const c=load('sexbjcam-mini-library.js');
+  c.Widget.http.get=async url=>({status:200,data:url.includes('player.test')?packedSexPlayer():'#EXTM3U\n'});
+  await assert.rejects(c.resolvePlayback({embedURL:sexEmbedURL}),/manifest-empty/);
+  await assert.rejects(c.getResourceVersions({itemId:sexDetailURL,embedURL:sexEmbedURL}),/manifest-empty/);
 });

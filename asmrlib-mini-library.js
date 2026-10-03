@@ -2,7 +2,7 @@
  * ASMRLIB - Dreamby / baiPlay 自定义媒体库
  * Source: https://asmrlib.com/
  * @author Alan huang
- * @version 1.2.0
+ * @version 1.2.2
  */
 
 const ASMRLIB_BASE = 'https://asmrlib.com';
@@ -89,16 +89,17 @@ function asmrResponseText(response) {
   return '';
 }
 
-async function asmrHTTP(url, referer) {
+async function asmrHTTP(url, referer, timeout) {
   const headers = asmrHeaders(referer);
+  timeout = timeout || 30;
   let response;
   if (typeof Widget !== 'undefined' && Widget.http) {
-    if (typeof Widget.http.get === 'function') response = await Widget.http.get(url, { headers: headers, timeout: 30 });
-    else if (typeof Widget.http.request === 'function') response = await Widget.http.request({ url: url, method: 'GET', headers: headers, timeout: 30 });
+    if (typeof Widget.http.get === 'function') response = await Widget.http.get(url, { headers: headers, timeout: timeout, timeoutSeconds: timeout });
+    else if (typeof Widget.http.request === 'function') response = await Widget.http.request({ url: url, method: 'GET', headers: headers, timeout: timeout, timeoutSeconds: timeout });
   }
   if (response === undefined && typeof $http !== 'undefined' && $http) {
-    if (typeof $http.get === 'function') response = await $http.get(url, { headers: headers, timeout: 30 });
-    else if (typeof $http.request === 'function') response = await $http.request({ url: url, method: 'GET', headers: headers, timeout: 30 });
+    if (typeof $http.get === 'function') response = await $http.get(url, { headers: headers, timeout: timeout, timeoutSeconds: timeout });
+    else if (typeof $http.request === 'function') response = await $http.request({ url: url, method: 'GET', headers: headers, timeout: timeout, timeoutSeconds: timeout });
   }
   if (response === undefined && typeof fetch === 'function') {
     const nativeResponse = await fetch(url, { headers: headers });
@@ -112,7 +113,7 @@ async function asmrHTTP(url, referer) {
 
 function asmrId(raw) {
   const value = asmrText(raw);
-  const match = value.match(/(?:asmrlib:\/\/post\/|\/posts\/)([a-f0-9]{32})/i);
+  const match = value.match(/(?:asmrlib(?:-page)?:\/\/post\/|\/posts\/)([a-f0-9]{32})/i);
   return match ? match[1] : (/^[a-f0-9]{32}$/i.test(value) ? value : '');
 }
 function asmrPayload(id) { return 'asmrlib://post/' + asmrId(id); }
@@ -191,12 +192,16 @@ function getManifest() {
     id: 'asmrlib',
     name: 'ASMRLIB',
     title: 'ASMRLIB',
-    version: '1.2.1',
+    version: '1.2.2',
     author: 'Alan huang',
     logo: ASMRLIB_LOGO,
     icon: ASMRLIB_LOGO,
     capabilities: { search: true, aggregation: true, playbackHistory: true },
-    aggregation: { search: true, playbackHistory: true }
+    aggregation: { search: true, playbackHistory: true },
+    parameters: [{
+      name: 'browserVisible', title: '显示播放验证页面', type: 'boolean', defaultValue: true,
+      description: 'BI 需要手动验证；AB 必须在详情页内打开。请在页面里选择线路并点击验证或播放，捕获到媒体后返回播放器。'
+    }]
   };
 }
 
@@ -291,6 +296,21 @@ function asmrDetailData(html, id) {
 }
 
 function asmrResourceGroups(detail) {
+  const embedded = detail.versions.some(function (version) {
+    return /^https?:\/\/(?:bysetayico\.com|abyssplayer\.com)(?:\/|$)/i.test(version.playerUrl);
+  });
+  if (embedded) {
+    // These players require the site's iframe/interaction context. Present one
+    // page entry; the user chooses BI/AB inside that page instead of promising
+    // that a standalone hidden request can select either embedded player.
+    return [{ id: 'online', title: '在线播放', versions: [{
+      id: 'asmrlib-page://post/' + detail.id,
+      name: '验证后播放（BI / AB）',
+      subtitle: '在页面里选择 BI 或 AB，再点击验证或播放',
+      default: true,
+      action: { type: 'play', itemId: asmrPayload(detail.id), versionId: 'asmrlib-page://post/' + detail.id, title: detail.title }
+    }] }];
+  }
   return [{
     id: 'online',
     title: '在线播放',
@@ -333,21 +353,38 @@ function asmrPlayable(value) {
   return /^https?:\/\//i.test(asmrText(value)) && /\.(?:m3u8|mp4|mpd|m4v|mov|webm)(?:[?#]|$)/i.test(asmrText(value));
 }
 function asmrBrowserMedia(result) {
-  if (!result) return '';
+  return asmrCapturedMedia(result).url;
+}
+function asmrCapturedMedia(result) {
+  if (!result) return { url: '', headers: {} };
+  const candidates = [];
+  const add = function (value, headers) {
+    if (asmrPlayable(value) && !/\/(?:ads?|advert|preview|trailer)(?:[\/_.-]|$)/i.test(value)) candidates.push({ url: value, headers: asmrMediaHeaders(headers) });
+  };
   const directKeys = ['url', 'mediaURL', 'mediaUrl', 'videoURL', 'videoUrl', 'playURL', 'playUrl', 'src'];
-  for (let i = 0; i < directKeys.length; i += 1) if (asmrPlayable(result[directKeys[i]])) return result[directKeys[i]];
-  const arrays = [result.mediaSources, result.mediaRequests, result.requests, result.responses, result.urls];
+  for (let i = 0; i < directKeys.length; i += 1) add(result[directKeys[i]], result.mediaHeaders || result.requestHeaders);
+  const arrays = [result.mediaSources, result.mediaRequests, result.capturedRequests, result.requests, result.responses, result.urls];
   for (let a = 0; a < arrays.length; a += 1) {
     if (!Array.isArray(arrays[a])) continue;
     for (let i = 0; i < arrays[a].length; i += 1) {
       const entry = arrays[a][i];
       const value = typeof entry === 'string' ? entry : entry && (entry.url || entry.src || entry.responseURL);
-      if (asmrPlayable(value) && !/^blob:/i.test(value)) return value;
+      add(value, entry && (entry.requestHeaders || entry.headers));
     }
   }
+  if (candidates.length) return candidates[0];
   const text = asmrResponseText(result).replace(/\\\//g, '/');
   const match = text.match(/https?:\/\/[^\s"'<>\\]+\.(?:m3u8|mp4|mpd|m4v|mov|webm)(?:\?[^\s"'<>\\]*)?/i);
-  return match && asmrPlayable(match[0]) ? match[0] : '';
+  if (match) add(match[0], null);
+  return candidates[0] || { url: '', headers: {} };
+}
+function asmrMediaHeaders(headers) {
+  const output = {};
+  Object.keys(headers || {}).forEach(function (key) {
+    const canonical = { referer: 'Referer', origin: 'Origin', 'user-agent': 'User-Agent', cookie: 'Cookie' }[key.toLowerCase()];
+    if (canonical && typeof headers[key] === 'string') output[canonical] = headers[key];
+  });
+  return output;
 }
 function asmrVersionPlayerURL(input) {
   const versionId = asmrText(asmrPick(input, ['versionId', 'resourceId', 'lineId'], ''));
@@ -386,7 +423,7 @@ async function asmrResolveUP(playerUrl) {
   if (!code) return '';
   const api = 'https://v.upn.one/api/v1/video?id=' + encodeURIComponent(code) +
     '&w=390&h=844&r=' + encodeURIComponent(ASMRLIB_BASE);
-  const encrypted = await asmrHTTP(api, ASMRLIB_BASE + '/');
+  const encrypted = await asmrHTTP(api, ASMRLIB_BASE + '/', 5);
   const data = asmrDecryptUP(encrypted);
   const candidates = [data.source, data.cfNative];
   if (data.hlsVideoTiktok && data.streamingConfig) {
@@ -416,69 +453,66 @@ async function asmrResolveUP(playerUrl) {
 async function resolvePlayback(input) {
   const direct = asmrText(asmrPick(input, ['url', 'path', 'playUrl', 'videoUrl'], ''));
   if (asmrPlayable(direct)) return asmrPlaybackResult(direct, direct);
-  let playerUrl = asmrVersionPlayerURL(input);
-  if (!playerUrl) {
-    const detail = await getDetail(input);
-    const version = detail.resourceGroups[0] && detail.resourceGroups[0].versions[0];
-    playerUrl = version ? asmrVersionPlayerURL(version.action) : '';
-  }
-  if (!playerUrl) throw new Error('没有找到 ASMRLIB 播放线路');
+  const playerUrl = asmrVersionPlayerURL(input);
+  const itemId = asmrId(asmrPick(input, ['itemId', 'id'], '')) ||
+    asmrId(asmrPick(input, ['versionId'], '')) || asmrId(playerUrl);
+  if (!itemId && !asmrUPCode(playerUrl)) throw new Error('缺少 ASMRLIB 内容 ID；请重新打开影片详情');
   if (typeof Widget === 'undefined' || !Widget.browser || typeof Widget.browser.fetch !== 'function') {
     throw new Error('当前 Dreamby 版本不支持设备内播放器解析');
   }
-  const candidates = [playerUrl];
-  const itemId = asmrId(asmrPick(input, ['itemId', 'id'], ''));
-  let media = '';
-  let resolvedReferer = playerUrl;
-  for (let i = 0; i < 2 && !media; i += 1) {
-    if (!candidates[i] && i === 1 && itemId) {
-      try {
-        const detail = await getDetail({ itemId: asmrPayload(itemId) });
-        const versions = detail.resourceGroups[0] ? detail.resourceGroups[0].versions : [];
-        versions.forEach(function (version) {
-          const alternate = asmrVersionPlayerURL(version.action);
-          if (alternate && candidates.indexOf(alternate) < 0) candidates.push(alternate);
-        });
-      } catch (_) {}
-    }
-    const candidate = candidates[i];
-    if (!candidate) continue;
-    if (asmrUPCode(candidate)) {
-      try {
-        media = await asmrResolveUP(candidate);
-        if (media) {
-          resolvedReferer = candidate;
-          break;
-        }
-      } catch (_) {}
-      continue;
-    }
+  if (asmrUPCode(playerUrl)) {
     try {
-      const result = await Widget.browser.fetch(candidate, {
-        visible: false,
-        timeout: 18,
-        timeoutSeconds: 18,
-        waitAfterLoad: 1.2,
-        waitForAny: true,
-        waitForMediaSource: true,
-        captureRequests: true,
-        captureMedia: true,
-        headers: asmrHeaders(ASMRLIB_BASE + '/')
-      });
-      media = asmrBrowserMedia(result);
-      if (media) resolvedReferer = candidate;
-    } catch (_) {}
+      const media = await asmrBounded('up-api', 5, function () { return asmrResolveUP(playerUrl); });
+      if (media) return asmrPlaybackResult(media, playerUrl);
+    } catch (error) {
+      if (!itemId) throw new Error('旧 UP 线路解析失败；stage=up-api；请重新打开影片详情选择当前线路');
+    }
   }
-  if (!media) throw new Error('快速线路和备用线路均未捕获到媒体，请稍后重试');
-  return asmrPlaybackResult(media, resolvedReferer);
+  const visibleValue = asmrPick(input, ['browserVisible'], true);
+  const visible = !/^(?:false|0|no|off)$/i.test(String(visibleValue));
+  const pageURL = ASMRLIB_BASE + '/posts/' + itemId;
+  // BI needs a human action; AB redirects when top.location == self.location.
+  // Keep the original page and iframe instead of loading either player alone.
+  const result = await asmrBounded('page-media', 20, function () {
+    return Widget.browser.fetch(pageURL, {
+      visible: visible, timeout: 20, timeoutSeconds: 20, waitAfterLoad: 1.2,
+      waitForMediaSource: true, headers: asmrHeaders(ASMRLIB_BASE + '/')
+    });
+  });
+  const media = asmrCapturedMedia(result);
+  if (!media.url) {
+    const html = asmrResponseText(result);
+    const blobOnly = /blob:/i.test(JSON.stringify(result || {}));
+    const verification = /验证你是真人|verify.{0,20}human|captcha|turnstile/i.test(html);
+    const stage = verification || !visible ? 'verification-required' : 'page-media';
+    throw new Error('ASMRLIB 未返回可交给播放器的媒体；stage=' + stage +
+      '；keys=' + Object.keys(result || {}).slice(0, 12).join(',') + '；blobOnly=' + blobOnly +
+      (stage === 'verification-required' ? '；请启用显示播放验证页面，并手动完成验证或点击播放' : '；若页面内已播放，宿主可能没有回传 iframe 媒体地址'));
+  }
+  // A captured media request supplies its own Referer/Origin. The outer ASMR
+  // page's origin is not necessarily the embedded player's media origin.
+  return asmrPlaybackResult(media.url, '', Object.assign({ 'User-Agent': ASMRLIB_UA }, media.headers));
 }
 
-function asmrPlaybackResult(url, referer) {
+async function asmrBounded(stage, seconds, operation) {
+  let timer;
+  try {
+    return await Promise.race([
+      Promise.resolve().then(operation),
+      new Promise(function (_, reject) { timer = setTimeout(function () { reject(new Error('ASMRLIB 请求超时；stage=' + stage)); }, seconds * 1000); })
+    ]);
+  } catch (error) {
+    if (String(error && error.message).indexOf('ASMRLIB 请求超时；stage=' + stage) === 0) throw error;
+    throw new Error('ASMRLIB 请求失败；stage=' + stage + '；请检查网络或宿主浏览器支持');
+  } finally { clearTimeout(timer); }
+}
+
+function asmrPlaybackResult(url, referer, capturedHeaders) {
   const container = /\.m3u8(?:[?#]|$)/i.test(url) ? 'm3u8' : (/\.mpd(?:[?#]|$)/i.test(url) ? 'mpd' : 'mp4');
   const originMatch = asmrText(referer).match(/^(https?:\/\/[^/]+)/i);
   return {
     url: url, container: container,
-    headers: { Referer: referer || ASMRLIB_BASE + '/', Origin: originMatch ? originMatch[1] : ASMRLIB_BASE, 'User-Agent': ASMRLIB_UA },
+    headers: capturedHeaders || { Referer: referer || ASMRLIB_BASE + '/', Origin: originMatch ? originMatch[1] : ASMRLIB_BASE, 'User-Agent': ASMRLIB_UA },
     startPositionSeconds: 0, isLive: false, streamKind: container === 'm3u8' ? 'hls' : 'file'
   };
 }

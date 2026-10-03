@@ -10,9 +10,11 @@
 | --- | --- | --- |
 | [eporner-mini-library 2.js](eporner-mini-library%202.js) | 1.0.9 | `eporner-mini-library.js` |
 | [xxxfollow-mini-library 5.js](xxxfollow-mini-library%205.js) | 1.0.1 | `xxxfollow-mini-library.js` |
-| [missav-mini-library-download-working 6.js](missav-mini-library-download-working%206.js) | 1.5.10 | `missav-mini-library-download-working.js`、`missav-mini-library.js`、`missav-mini-library-CloudFlare.js` |
+| [missav-mini-library-download-working 6.js](missav-mini-library-download-working%206.js) | 1.5.11 | `missav-mini-library-download-working.js`、`missav-mini-library.js`、`missav-mini-library-CloudFlare.js` |
 
-Eporner、XXXFollow 的两份文件原本内容相同。MissAV 的两个旧 1.0.7 实现升级为 1.5.10 兼容副本，保留 `missav-mini-library` ID、旧参数名和 `missav://detail?` 历史条目格式。
+Eporner、XXXFollow 的两份文件原本内容相同。MissAV 的两个旧 1.0.7 实现升级为当前维护版的兼容副本，保留 `missav-mini-library` ID、旧参数名和 `missav://detail?` 历史条目格式。
+
+MissAV 1.5.11 修正正常 HTTP 200 页面被误判成 Cloudflare 验证页的问题，并为播放阶段增加脚本侧请求截止时间。旧下载地址保持不变。桌面实际页面解析和离线回归已验证；iPhone 原生起播仍需设备确认，桌面匿名 HTTP 请求视频 CDN 的 403 与地址解析结果分别记录。
 
 日常只修改左侧主维护文件，再运行：
 
@@ -39,25 +41,53 @@ GitHub Actions 会先生成兼容副本并验证；`main` 的检查通过后，�
 | [591av-mini-library.js](591av-mini-library.js) | 1.3.1 | 1.3.2 |
 | [91porny_int.js](91porny_int.js) | 0.9.6 | 0.9.7 |
 | [MissAV 3.0.js](MissAV%203.0.js) | 3.0 | 3.0.1 |
-| [asmrlib-mini-library.js](asmrlib-mini-library.js) | 1.2.0 | 1.2.1 |
+| [asmrlib-mini-library.js](asmrlib-mini-library.js) | 1.2.0 | 1.2.2 |
 | [girigirilove-mini-library.js](girigirilove-mini-library.js) | 1.0.0 | 1.0.1 |
 | [jable.js](jable.js) | 1.3.0 | 1.3.1 |
 | [jable.media-library.js](jable.media-library.js) | 1.0.0 | 1.0.1 |
-| [javgg-mini-library.js](javgg-mini-library.js) | 1.0.0 | 1.0.1 |
-| [kbjfan-mini-library.js](kbjfan-mini-library.js) | 1.0.0 | 1.0.1 |
+| [javgg-mini-library.js](javgg-mini-library.js) | 1.0.0 | 1.0.2 |
+| [kbjfan-mini-library.js](kbjfan-mini-library.js) | 1.0.0 | 1.0.2 |
 | [madou8-domestic-mini-library.js](madou8-domestic-mini-library.js) | 1.2.1 | 1.2.2 |
-| [madou8-mini-library 5.js](madou8-mini-library%205.js) | 1.1.0 | 1.1.1 |
+| [madou8-mini-library 5.js](madou8-mini-library%205.js) | 1.1.0 | 1.1.2 |
 | [manko-fun-mini-library.js](manko-fun-mini-library.js) | 1.8.0 | 1.8.1 |
-| [missav-mini-library-download-working 6.js](missav-mini-library-download-working%206.js) | 1.5.9 | 1.5.10 |
+| [missav-mini-library-download-working 6.js](missav-mini-library-download-working%206.js) | 1.5.9 | 1.5.11 |
 | [novipnoad-mini-library.js](novipnoad-mini-library.js) | 1.0.0 | 1.0.1 |
 | [pornhub.media-library.js](pornhub.media-library.js) | 1.0.0 | 1.0.1 |
 | [pornhub_int.js](pornhub_int.js) | 1.1.5 | 1.1.6 |
-| [sexbjcam-mini-library.js](sexbjcam-mini-library.js) | 1.1.7 | 1.1.8 |
-| [taolusm-mini-library.js](taolusm-mini-library.js) | 1.0.0 | 1.0.1 |
+| [sexbjcam-mini-library.js](sexbjcam-mini-library.js) | 1.1.7 | 1.1.9 |
+| [taolusm-mini-library.js](taolusm-mini-library.js) | 1.0.0 | 1.0.2 |
 | [xvideos_int.js](xvideos_int.js) | 0.9.6 | 0.9.7 |
 | [xxxfollow-mini-library 5.js](xxxfollow-mini-library%205.js) | 1.0.0 | 1.0.1 |
 
 具体行为和设备验证限制见 [CHANGELOG.md](CHANGELOG.md)。
+
+## 统一故障修复 — 2026-10-03
+
+- 麻豆亚洲版 `madou8-mini-library 5.js` 为 1.1.2：首屏只取最近更新，分类预览随后加载；HTTP 错误及验证失败明确报告。五个分类前两页各返回 12 条且没有跨页重复；桌面首屏 1.543 秒。原文件名、ID、`baseUrl` 和 `madou8://` 版本载荷保持兼容。
+- 播放检查最多 12 条实际普通 HLS 线路，使用三个逻辑并发任务和 28 秒预算，避免接口顺序变化时漏掉第五条以后的有效源。沿用网页 `xhrSetup` 的 `Accept` 凭据，每次从 API 刷新，不写入版本/缓存。专用 StreamPipe/service-worker 线路及明确 `native:false` 的线路不会伪装成原生地址。
+- 麻豆 IPX-559 已验证原始 HLS 及 MPEG-TS 分片；来源未标明该线路分辨率，没有宣称 1080P 恢复。STCV-497 返回 720P；另一部普通影片返回 1080P/720P/480P/360P，并通过 1080P → 720P → 1080P 的桌面请求。仍有 CDN 返回 403；未通过伪造权限或签名规避。
+- 套路 SM `taolusm-mini-library.js` 为 1.0.2：旧下载入口会跳到登录页，现从当前影片主播放器配置读取实际源。三部匿名 HTTP 样本仅提供公开预览，资源明确标注“公开预览（非完整影片）”；旧下载选择报告登录/观看权限，完整影片未宣称恢复。
+- KBJ fan `kbjfan-mini-library.js` 为 1.0.2：补充 HTTP 状态、响应正文、8 秒截止时间和域名跳转诊断，加载失败不再返回成功的空首页或假播放线路。当前原域名连接中断，另一次网页读取跳到其他站点；用户 iPhone 测试也确认打不开。没有确认到官方替代地址，内容恢复仍待可用站点。
+
+三个新增修复原先独立通过 64 项回归；与 MissAV、ASMRLIB、JAVGG、SexBJCam 整合后共 103 项媒体库回归及仓库检查通过。以上真实媒体结果来自桌面 HTTP；DreamBy/iPhone 的显示、原生起播及验证状态衔接仍需设备确认。用户报告的 IPX-559 所属媒体库尚待确认，本轮按麻豆亚洲版检查该影片。原下载路径全部保留；完整变更见 [PR #13](https://github.com/bbnotcode/ph_js/pull/13)。用户已要求发布这些改动，更新时沿用既有导入地址；无需删除媒体库重导。
+
+ASMRLIB 1.2.2 的 BI/AB 使用“验证后播放”入口，在原详情页内选择线路并手动验证或点击播放。源设置中的“显示播放验证页面”默认开启。只有浏览器返回最终媒体地址才会交给原生播放器；若只返回网页或 blob，脚本会显示具体阶段。此流程的代码及模拟已验证，iPhone 嵌套媒体回传、自动交回和起播仍待设备确认。
+
+## JAVGG 1.0.2 播放修复
+
+`javgg-mini-library.js` 保持原下载路径、媒体库 ID、`baseUrl` 参数和旧 `javgg://` 载荷。按实际 `data-nume` 对应 VH、playmate、luluvdoo、SW 线路，静态读取公开播放器的打包代码，不执行远程脚本。资源列表仅包含本次成功读取到的真实画质，最高画质默认；地址在每次播放时刷新。
+
+画质发现与播放各有 28 秒总时限，播放器及清单 HTTP 阶段最多 4 秒；两路并发检查，某条线路失效不会抹掉其他可用线路。静态发现已有可用线路时直接返回；全部失败时最多一次 8 秒浏览器媒体捕获。已选线路播放的捕获最多 10 秒。404、验证页、非 HLS 响应会明确失败，临时发现失败可重新请求。脚本截止时间不能强制取消宿主已经启动的原生请求。
+
+匿名桌面 HTTP 已验证 CAWB-046 的 luluvdoo 1080p、SW 1080p/720p/480p 和 MIRD-287 的 luluvdoo 720p，master、变体与分片可请求；ATID-666 的 SW 清单当时返回 404。首页/详情 HTTP 还可能遇到站点浏览器检查，浏览器正常打开不等于设备脚本能读取。DreamBy 浏览器回传、iPhone 原生起播与切画质仍待实测。
+
+## SexBJCam 1.1.9 播放修复
+
+保留 `sexbjcam-mini-library.js` 原下载路径、`sexbjcam-mini-library` ID、`baseURL` 参数、历史详情 URL 与 `quality:1080/720/480` ID。播放器改为先用 HTTP 读取公开打包配置，必要时只做一次 12 秒浏览器媒体捕获；HLS 正文使用最多 4 秒 HTTP 请求，不再用浏览器导航清单。详情、资源发现和播放各有 28 秒总时限；脚本截止时间不能强制取消宿主原生任务。
+
+画质仅取真实清单或此前成功验证的分辨率元数据，签名地址在播放时刷新。只有原始 HLS 时明确显示“原始画质”，暂时失败不生成假默认线路；404、验证页、非 HLS 和捕获失败显示具体阶段。捕获媒体请求头仅用于本次播放，不写入画质缓存。详情标题优先读取影片标题，避免把嵌套上传者姓名当作标题。
+
+匿名 HTTP 已验证 `recordplay.biz` 和 `playrecord.biz` 的真实 master、1080p/720p/480p 与范围分片；播放器请求也有超时，源站并非始终稳定。匿名主站详情出现过 Cloudflare 403，浏览器会话中可正常读取；不将桌面网页或 HTTP 成功视为 DreamBy/iPhone 原生播放验收。
 
 ## 本地验收
 
