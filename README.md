@@ -10,9 +10,11 @@
 | --- | --- | --- |
 | [eporner-mini-library 2.js](eporner-mini-library%202.js) | 1.0.9 | `eporner-mini-library.js` |
 | [xxxfollow-mini-library 5.js](xxxfollow-mini-library%205.js) | 1.0.1 | `xxxfollow-mini-library.js` |
-| [missav-mini-library-download-working 6.js](missav-mini-library-download-working%206.js) | 1.5.10 | `missav-mini-library-download-working.js`、`missav-mini-library.js`、`missav-mini-library-CloudFlare.js` |
+| [missav-mini-library-download-working 6.js](missav-mini-library-download-working%206.js) | 1.5.11 | `missav-mini-library-download-working.js`、`missav-mini-library.js`、`missav-mini-library-CloudFlare.js` |
 
-Eporner、XXXFollow 的两份文件原本内容相同。MissAV 的两个旧 1.0.7 实现升级为 1.5.10 兼容副本，保留 `missav-mini-library` ID、旧参数名和 `missav://detail?` 历史条目格式。
+Eporner、XXXFollow 的两份文件原本内容相同。MissAV 的两个旧 1.0.7 实现升级为当前维护版的兼容副本，保留 `missav-mini-library` ID、旧参数名和 `missav://detail?` 历史条目格式。
+
+MissAV 1.5.11 修正正常 HTTP 200 页面被误判成 Cloudflare 验证页的问题，并为播放阶段增加脚本侧请求截止时间。旧下载地址保持不变。桌面实际页面解析和离线回归已验证；iPhone 原生起播仍需设备确认，桌面匿名 HTTP 请求视频 CDN 的 403 与地址解析结果分别记录。
 
 日常只修改左侧主维护文件，再运行：
 

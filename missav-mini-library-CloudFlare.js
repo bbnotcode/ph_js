@@ -12,7 +12,7 @@ const WidgetMetadata = {
   id: 'missav-mini-library',
   name: 'MissAV',
   title: 'MissAV',
-  version: '1.5.10',
+  version: '1.5.11',
   author: 'Alan huang',
   logo: MISSAV_LOGO,
   icon: MISSAV_LOGO,
@@ -763,28 +763,22 @@ async function resolvePlaybackWithinBudget(ctx) {
   try {
     html = await fetchText(ctx, detailURL, entryURL(ctx));
   } catch (error) {
-    // Playback has a separate, narrowly-scoped hidden browser media fallback.
+    recordPlaybackFailure(ctx, error);
   }
   let masterURL = extractPlayableURL(html);
   if (!masterURL) masterURL = await extractPlayableFromLinkedPlayers(ctx, html, detailURL);
   if (!masterURL) masterURL = await extractFromBrowser(detailURL, detailURL, ctx);
   let url = masterURL;
   if (masterURL) {
-    let qualities = await discoverAvailableQualities(ctx, masterURL, detailURL, html);
-    const knownQuality = qualities.some(function (quality) { return quality.height > 0; });
-    const missingRequested = requestedQuality && !qualities.some(function (quality) { return String(quality.height) === String(requestedQuality); });
-    if ((!knownQuality || missingRequested) && ctx.__playbackBudget.browserCalls === 0) {
-      const browserMasterURL = await extractFromBrowser(detailURL, detailURL, ctx);
-      if (browserMasterURL && browserMasterURL !== masterURL) {
-        const browserQualities = await discoverAvailableQualities(ctx, browserMasterURL, detailURL, html);
-        if (browserQualities.length > qualities.length) qualities = browserQualities;
-      }
-    }
+    const qualities = await discoverAvailableQualities(ctx, masterURL, detailURL, html);
+    // A valid master can let the native player choose a variant. Optional quality
+    // discovery must not spend a browser round or prevent that handoff.
     const selected = selectQuality(qualities, requestedQuality);
     if (selected && selected.url) url = selected.url;
   }
   if (!url) {
-    throw new Error('未能解析到 MissAV 播放地址。站点可能启用了 Cloudflare 或更换了播放器脚本，请尝试更新入口路径或在 App 侧启用浏览器请求。');
+    const failures = ctx.__playbackBudget.failures.join('；');
+    throw new Error('未能解析到 MissAV 播放地址；stage=media-discovery' + (failures ? '；' + failures : '') + '。请检查站点地址；若提示验证，请先手动完成验证。');
   }
   return playbackResult(ctx, absoluteURL(ctx, url), detailURL);
 }
@@ -906,14 +900,16 @@ async function onAction(ctx) {
 }
 
 async function extractPlayableFromLinkedPlayers(ctx, html, referer) {
-  const urls = extractPlayerURLs(ctx, html, referer);
+  const urls = extractPlayerURLs(ctx, html, referer).filter(function (url) {
+    return !/googletagmanager\.com|snaptrckr\.|myavlive\.com|mayzaent\.com|rallytrck\./i.test(originOf(url));
+  }).slice(0, ctx && ctx.__playbackBudget ? 1 : 5);
   for (let index = 0; index < urls.length; index += 1) {
     try {
       const playerHTML = await fetchText(ctx, urls[index], referer);
       const playable = extractPlayableURL(playerHTML);
       if (playable) return playable;
     } catch (error) {
-      // Ignore broken auxiliary player pages and continue with browser fallback.
+      recordPlaybackFailure(ctx, error);
     }
   }
   return '';
@@ -1121,6 +1117,19 @@ async function fetchActressIndexText(ctx, url, referer) {
 }
 
 async function fetchText(ctx, url, referer) {
+  if (ctx && ctx.__playbackBudget) {
+    // Refresh player authorization on each play and reserve the one browser
+    // request for media capture, rather than an HTML-only verification attempt.
+    return runPlaybackStage(ctx, 'detail-http', 6, async function () {
+      const response = await httpGet(url, requestOptions(ctx, referer || entryURL(ctx)));
+      const text = responseText(response);
+      const status = responseStatus(response);
+      if (!isUsableHTML(text, status, response && response.headers)) {
+        throw playbackStageError('detail-http', 'HTTP ' + (status || 'empty') + (isCloudflare(text, status, response && response.headers) ? '；需要验证或站点拒绝请求' : '；页面不可用'));
+      }
+      return text;
+    });
+  }
   const cached = getCachedText(ctx, url);
   if (cached) return cached;
 
@@ -1132,12 +1141,12 @@ async function fetchText(ctx, url, referer) {
     try {
       const response = await httpGet(currentURL, requestOptions(ctx, requestReferer));
       const text = responseText(response);
-      if (isUsableHTML(text, response && response.status, response && response.headers)) {
+      if (isUsableHTML(text, responseStatus(response), response && response.headers)) {
         setCachedText(ctx, currentURL, text);
         if (currentURL !== url) setCachedText(ctx, url, text);
         return text;
       }
-      if (isCloudflare(text, response && response.status, response && response.headers)) {
+      if (isCloudflare(text, responseStatus(response), response && response.headers)) {
         const browserText = await browserHTML(ctx, currentURL, requestReferer);
         if (isUsableHTML(browserText)) {
           setCachedText(ctx, currentURL, browserText);
@@ -1239,6 +1248,10 @@ function responseText(response) {
   return String(response.data || response.body || '');
 }
 
+function responseStatus(response) {
+  return Number(response && (response.statusCode || response.status)) || 0;
+}
+
 async function browserHTML(ctx, url, referer, forceVisible) {
   if (!boolParam(ctx, 'enableBrowserFallback', true)) return '';
   if (forceVisible !== true && !boolParam(ctx, 'automaticBrowserFallback', true)) return '';
@@ -1297,12 +1310,20 @@ function clearBrowserFailure(url) {
 
 async function extractFromBrowser(url, referer, ctx) {
   if (ctx && ctx.__playbackBudget && ctx.__playbackBudget.browserCalls >= 1) return '';
-  if (typeof Widget === 'undefined' || !Widget.browser || typeof Widget.browser.fetch !== 'function') return '';
+  if (!boolParam(ctx, 'enableBrowserFallback', true) || !boolParam(ctx, 'automaticBrowserFallback', true)) {
+    recordPlaybackFailure(ctx, new Error('stage=browser-media；浏览器回退已关闭'));
+    return '';
+  }
+  if (typeof Widget === 'undefined' || !Widget.browser || typeof Widget.browser.fetch !== 'function') {
+    recordPlaybackFailure(ctx, new Error('stage=browser-media；宿主未提供浏览器接口'));
+    return '';
+  }
   try {
-    const result = await Widget.browser.fetch(url, {
+    const timeout = playbackBrowserSeconds(ctx, 12, 1);
+    const result = await runPlaybackStage(ctx, 'browser-media', timeout, function () { return Widget.browser.fetch(url, {
       visible: false,
-      timeout: playbackBrowserSeconds(ctx, 12, 1),
-      timeoutSeconds: remainingPlaybackSeconds(ctx, 12),
+      timeout: timeout,
+      timeoutSeconds: timeout,
       waitAfterLoad: 3,
       waitForMediaSource: true,
       waitForAny: true,
@@ -1312,13 +1333,18 @@ async function extractFromBrowser(url, referer, ctx) {
         'User-Agent': MISSAV_UA,
         Referer: referer || url
       }
-    });
-    return firstNonEmpty(
+    }); });
+    const playable = firstNonEmpty(
       playableFromBrowserResult(result),
       extractPlayableURL(responseText(result)),
       extractPlayableURL(result && result.html)
     );
+    if (!playable) {
+      recordPlaybackFailure(ctx, new Error('stage=browser-media；未返回媒体地址；keys=' + Object.keys(result || {}).slice(0, 12).join(',')));
+    }
+    return playable;
   } catch (error) {
+    recordPlaybackFailure(ctx, error);
     return '';
   }
 }
@@ -2195,7 +2221,9 @@ async function discoverAvailableQualities(ctx, playlistURL, referer, html) {
     });
   }
 
-  const urls = unique(candidates.map(function (item) { return item.url; })).slice(0, 8);
+  const urls = ctx && ctx.__playbackBudget
+    ? [playlistURL]
+    : unique(candidates.map(function (item) { return item.url; })).slice(0, 8);
   let next = 0;
   await Promise.all(Array.from({ length: Math.min(2, urls.length) }, async function () {
     while (next < urls.length) {
@@ -2275,17 +2303,24 @@ function normalizeQualities(qualities) {
 async function discoverQualities(ctx, playlistURL, referer) {
   if (!isPlayableURL(playlistURL) || containerOf(playlistURL) !== 'm3u8') return [];
   try {
-    const response = await httpGet(playlistURL, {
+    const budget = ctx && ctx.__playbackBudget;
+    const remaining = budget ? (budget.endAt - Date.now()) / 1000 : 5.5;
+    if (remaining <= 0.5) return [];
+    // Leave room to return an already discovered URL before the outer deadline.
+    const timeout = remainingPlaybackSeconds(ctx, Math.min(5, remaining - 0.5));
+    const response = await runPlaybackStage(ctx, 'master-http', timeout, function () { return httpGet(playlistURL, {
       headers: playbackHeaders(ctx || {}, referer || playlistURL),
-      timeout: remainingPlaybackSeconds(ctx, 5),
-      timeoutSeconds: remainingPlaybackSeconds(ctx, 5),
+      timeout: timeout,
+      timeoutSeconds: timeout,
       useBrowserCookie: true,
       attachBrowserCookie: true
-    });
+    }); });
+    if (responseStatus(response) >= 400) throw playbackStageError('master-http', 'HTTP ' + responseStatus(response));
     const playlist = responseText(response);
     if (playlist.indexOf('#EXT-X-STREAM-INF') < 0) return [];
     return parseMasterQualities(playlist, playlistURL);
   } catch (error) {
+    recordPlaybackFailure(ctx, error);
     return [];
   }
 }
@@ -2910,14 +2945,20 @@ function isDetailPageURL(url) {
 }
 
 function isCloudflare(html, status, headers) {
-  const text = String(html || '') + ' ' + JSON.stringify(headers || {});
+  const text = String(html || '');
+  const title = cleanText(firstMatch(text, /<title\b[^>]*>([\s\S]*?)<\/title>/i));
+  const mitigated = Object.keys(headers || {}).some(function (key) {
+    return key.toLowerCase() === 'cf-mitigated' && /challenge/i.test(String(headers[key]));
+  });
+  // Cloudflare's passive /challenge-platform/scripts/jsd/main.js also occurs
+  // on successful media pages. Only explicit blocking-page evidence counts.
   return Number(status) === 403 ||
     Number(status) === 429 ||
     Number(status) === 503 ||
-    /<title>\s*Just a moment/i.test(text) ||
-    /Checking your browser|Verifying you are human|Verify you are human|Ray ID/i.test(text) ||
-    /Enable JavaScript and cookies to continue/i.test(text) ||
-    /cf-mitigated|cf-browser-verification|cf-chl-|challenge-platform|turnstile/i.test(text);
+    mitigated ||
+    /^(?:Just a moment|Attention Required|Checking your browser|Verifying you are human|Verify you are human)/i.test(title) ||
+    /\bid\s*=\s*["'](?:challenge-form|cf-challenge-running|cf-browser-verification)["']/i.test(text) ||
+    /Enable JavaScript and cookies to continue/i.test(stripTags(text));
 }
 
 function decodeEscapes(value) {
@@ -3068,15 +3109,48 @@ async function withPlaybackBudget(input, operation) {
   let ctx = input;
   if (typeof ctx === 'string') { try { ctx = JSON.parse(ctx); } catch (_) { ctx = {}; } }
   ctx = Object.assign({}, ctx && typeof ctx === 'object' ? ctx : {});
-  const budget = { endAt: Date.now() + 28000, expired: false, browserCalls: 0 };
+  const budget = { endAt: Date.now() + 28000, expired: false, browserCalls: 0, stage: 'start', failures: [] };
   ctx.__playbackBudget = budget;
   let timer;
   try {
     const timeout = new Promise(function (_, reject) {
-      timer = setTimeout(function () { budget.expired = true; reject(new Error('播放解析超时；stage=total-deadline；请稍后重试')); }, 28000);
+      timer = setTimeout(function () { budget.expired = true; reject(new Error('播放解析超时；stage=total-deadline；lastStage=' + budget.stage + '；请稍后重试')); }, 28000);
     });
     return await Promise.race([Promise.resolve().then(function () { return operation(ctx); }), timeout]);
   } finally { clearTimeout(timer); budget.expired = true; }
+}
+
+function recordPlaybackFailure(ctx, error) {
+  const budget = ctx && ctx.__playbackBudget;
+  if (!budget) return;
+  // No cookies, signed media URLs, or raw host exception text in diagnostics.
+  const raw = String(error && error.message || '');
+  const message = /stage=(?:detail-http|browser-media|master-http|total-deadline)/.test(raw)
+    ? raw.replace(/https?:\/\/[^\s；]+/gi, '[URL]').slice(0, 200)
+    : '请求失败；stage=' + budget.stage;
+  if (budget.failures.indexOf(message) < 0) budget.failures.push(message);
+}
+
+async function runPlaybackStage(ctx, stage, limit, operation) {
+  const timeout = remainingPlaybackSeconds(ctx, limit);
+  const budget = ctx && ctx.__playbackBudget;
+  if (budget) budget.stage = stage;
+  let timer;
+  try {
+    return await Promise.race([
+      Promise.resolve().then(function () { remainingPlaybackSeconds(ctx, limit); return operation(); }),
+      new Promise(function (_, reject) { timer = setTimeout(function () { reject(playbackStageError(stage, '请求超时')); }, timeout * 1000); })
+    ]);
+  } catch (error) {
+    if (error && error.missavPlaybackStage === true) throw error;
+    throw playbackStageError(stage, '请求失败');
+  } finally { clearTimeout(timer); }
+}
+
+function playbackStageError(stage, reason) {
+  const error = new Error(reason + '；stage=' + stage);
+  error.missavPlaybackStage = true;
+  return error;
 }
 
 function remainingPlaybackSeconds(ctx, limit) {
