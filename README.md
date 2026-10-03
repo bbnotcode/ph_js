@@ -39,7 +39,7 @@ GitHub Actions 会先生成兼容副本并验证；`main` 的检查通过后，�
 | [591av-mini-library.js](591av-mini-library.js) | 1.3.1 | 1.3.2 |
 | [91porny_int.js](91porny_int.js) | 0.9.6 | 0.9.7 |
 | [MissAV 3.0.js](MissAV%203.0.js) | 3.0 | 3.0.1 |
-| [asmrlib-mini-library.js](asmrlib-mini-library.js) | 1.2.0 | 1.2.1 |
+| [asmrlib-mini-library.js](asmrlib-mini-library.js) | 1.2.0 | 1.2.2 |
 | [girigirilove-mini-library.js](girigirilove-mini-library.js) | 1.0.0 | 1.0.1 |
 | [jable.js](jable.js) | 1.3.0 | 1.3.1 |
 | [jable.media-library.js](jable.media-library.js) | 1.0.0 | 1.0.1 |
@@ -58,6 +58,8 @@ GitHub Actions 会先生成兼容副本并验证；`main` 的检查通过后，�
 | [xxxfollow-mini-library 5.js](xxxfollow-mini-library%205.js) | 1.0.0 | 1.0.1 |
 
 具体行为和设备验证限制见 [CHANGELOG.md](CHANGELOG.md)。
+
+ASMRLIB 1.2.2 的 BI/AB 使用“验证后播放”入口，在原详情页内选择线路并手动验证或点击播放。源设置中的“显示播放验证页面”默认开启。只有浏览器返回最终媒体地址才会交给原生播放器；若只返回网页或 blob，脚本会显示具体阶段。此流程的代码及模拟已验证，iPhone 嵌套媒体回传、自动交回和起播仍待设备确认。
 
 ## 本地验收
 
