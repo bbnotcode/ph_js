@@ -11,7 +11,7 @@ const WidgetMetadata = {
   id: '123av-mini-library',
   name: '123AV',
   title: '123AV',
-  version: '1.1.0',
+  version: '1.1.1',
   requiredVersion: '0.0.1',
   author: 'Alan huang',
   site: AV123_DEFAULT_BASE,
@@ -93,6 +93,7 @@ function getManifest() {
 }
 
 async function getHome(ctx) {
+  ctx = normalizeRuntimeContext(ctx);
   const browseSection = {
     id: '123av-browse',
     title: '分类浏览',
@@ -116,6 +117,7 @@ async function getHome(ctx) {
 }
 
 async function getHomeSection(ctx) {
+  ctx = normalizeRuntimeContext(ctx);
   const sectionId = stringValue(ctx && (ctx.sectionId || ctx.id || ctx.pageId));
   const section = findSection(sectionId) || AV123_SECTIONS[0];
   try {
@@ -134,6 +136,7 @@ async function getHomeSection(ctx) {
 }
 
 async function getCategory(ctx) {
+  ctx = normalizeRuntimeContext(ctx);
   const page = positiveInt(contextValue(ctx, 'page'), 1);
   const pageId = normalizePageId(ctx && (ctx.pageId || ctx.id), 'new');
   const section = findSection(pageId);
@@ -160,6 +163,7 @@ async function getCategory(ctx) {
 }
 
 async function getDetail(ctx) {
+  ctx = normalizeRuntimeContext(ctx);
   const detailUrl = detailURLFromContext(ctx);
   if (!detailUrl) throw new Error('123AV 详情参数无效');
 
@@ -240,6 +244,7 @@ async function getDetail(ctx) {
 }
 
 async function getResourceVersions(ctx) {
+  ctx = normalizeRuntimeContext(ctx);
   const direct = stringValue(ctx && (ctx.playUrl || ctx.url || ctx.videoUrl));
   if (isPlayableURL(direct)) {
     return playbackGroups('', ctx && ctx.title, ctx && ctx.surritCode, ctx && ctx.playerUrl, direct, ctx);
@@ -256,6 +261,7 @@ async function getResourceVersions(ctx) {
 }
 
 async function resolvePlayback(ctx) {
+  ctx = normalizeRuntimeContext(ctx);
   const decoded = decodeDetailPayload(ctx && (ctx.versionId || ctx.itemId || ctx.id));
   const direct = firstNonEmpty(ctx && ctx.playUrl, ctx && ctx.url, ctx && ctx.videoUrl, decoded.playUrl);
   if (isPlayableURL(direct) && !isDetailURL(direct)) {
@@ -278,6 +284,7 @@ async function resolvePlayback(ctx) {
 }
 
 async function search(ctx) {
+  ctx = normalizeRuntimeContext(ctx);
   const query = stringValue(ctx && (ctx.query || ctx.keyword || ctx.text));
   const page = positiveInt(contextValue(ctx, 'page'), 1);
   if (!query) {
@@ -992,4 +999,17 @@ if (typeof globalThis !== 'undefined') {
 
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = exported;
+}
+
+function normalizeRuntimeContext(input) {
+  let ctx = input;
+  if (typeof ctx === 'string') { try { ctx = JSON.parse(ctx); } catch (_) { ctx = {}; } }
+  if (!ctx || typeof ctx !== 'object' || Array.isArray(ctx)) return {};
+  const nested = {};
+  ['params', 'config', 'settings', 'parameters', 'pagination', 'pageInfo'].forEach(function (key) {
+    let bag = ctx[key];
+    if (typeof bag === 'string') { try { bag = JSON.parse(bag); } catch (_) { bag = null; } }
+    if (bag && typeof bag === 'object' && !Array.isArray(bag)) Object.keys(bag).forEach(function (name) { if (nested[name] === undefined) nested[name] = bag[name]; });
+  });
+  return Object.assign(nested, ctx);
 }

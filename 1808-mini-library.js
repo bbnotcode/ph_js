@@ -1,6 +1,6 @@
 /**
  * 1808.online - Dreamby / baiPlay 自定义媒体库
- * 电脑端验证版本：1.0.5
+ * 脚本版本：1.0.6（原地址兼容更新）
  */
 
 const SITE = "https://1808.online";
@@ -109,8 +109,8 @@ async function fetchText(ctx, path, referer) {
   else if (typeof $http !== "undefined" && typeof $http.request === "function") response = await $http.request({ url, method: "GET", ...options });
   else if (typeof fetch === "function") response = await fetch(url, { headers });
   else throw new Error("当前环境没有可用的 HTTP 客户端");
-  if (response && typeof response.text === "function") return response.text();
-  const html = responseText(response);
+  if (Number(response && (response.status || response.statusCode)) >= 400) throw new Error('源站 HTTP ' + (response.status || response.statusCode));
+  const html = response && typeof response.text === 'function' ? await response.text() : responseText(response);
   if (!html || /Just a moment|cf-mitigated|Cloudflare Ray ID/i.test(html)) throw new Error("站点返回空内容或 Cloudflare 验证页");
   return html;
 }
@@ -121,7 +121,7 @@ function imageHeaders(ctx, referer) {
 
 function fallbackItems(ctx) {
   return HOME_FALLBACK.map(([id, title, poster, year]) => ({
-    id, title, subtitle: String(year), type: "movie", poster, year,
+    id, title, subtitle: "历史推荐（2026-07-18）", badges: ["历史片单"], type: "movie", poster, year,
     imageHeaders: imageHeaders(ctx), posterHeaders: imageHeaders(ctx),
     action: { type: "detail", itemId: id }
   }));
@@ -147,31 +147,9 @@ function movieSlug(id) {
   return movieId(id).match(/\/movies\/([^/]+)\.html$/i)?.[1] || "";
 }
 
-function syntheticPlaybackLines(ctx, id) {
-  const slug = movieSlug(id);
-  if (!slug) return [];
-  const referer = absoluteURL(ctx, id);
-  const definitions = [
-    ["标清 360P", `https://ru.youxijiasu007.shop/movie/360/${slug}/360.m3u8`],
-    ["高清 720P", `https://ru.youxijiasu007.shop/movie/720/${slug}/720.m3u8`],
-    ["标清 360P 线路2", `https://ru.kuikuigo8923.space/movie/360/${slug}/360.m3u8`],
-    ["高清 720P 线路2", `https://ru.kuikuigo8923.space/movie/720/${slug}/720.m3u8`],
-    ["标清 360P 移动线路", `https://fmv.youxijiasu007.shop/movie/360/${slug}/360.m3u8`],
-    ["高清 720P 移动线路", `https://fmv.youxijiasu007.shop/movie/720/${slug}/720.m3u8`]
-  ];
-  return definitions.map(([title, url]) => ({ id: url, title, url, referer }));
-}
 
-function fallbackDetail(ctx, id) {
-  const seed = HOME_FALLBACK.find(item => item[0] === id);
-  const title = seed?.[1] || movieSlug(id).replace(/_/g, " ");
-  const poster = seed?.[2] || `https://img.9bf85763.website/covers/${movieSlug(id)}.jpg`;
-  return {
-    title, poster, overview: "",
-    actorText: "", urls: syntheticPlaybackLines(ctx, id), related: fallbackItems(ctx).filter(item => item.id !== id).slice(0, 12),
-    referer: absoluteURL(ctx, id)
-  };
-}
+
+
 
 function parseMovieCards(ctx, html) {
   const cards = [];
@@ -226,7 +204,7 @@ function parseDetailPage(ctx, html, id) {
 
 function getManifest() {
   return {
-    id: "1808-online", name: "1808在线", title: "1808在线", version: "1.0.5", author: "Codex",
+    id: "1808-online", name: "1808在线", title: "1808在线", version: "1.0.6", author: "Alan huang",
     logo: ICON, icon: ICON, site: SITE, adult: true,
     capabilities: { home: true, category: true, detail: true, search: false, resourceVersions: true, playback: true, resourceMatching: false },
     aggregation: { search: false, playbackHistory: true, resourceMatching: false },
@@ -240,78 +218,53 @@ async function loadCategory(ctx, id) {
 }
 
 async function getHome(ctx) {
-  let latest = fallbackItems(ctx);
-  if (hasHTTPClient()) {
-    try {
-      const remote = (await loadCategory(ctx, "latest")).items.slice(0, 18);
-      if (remote.length) latest = remote;
-    } catch (_) {}
-  }
+  let latest = []; let error = '';
+  try { latest = (await loadCategory(ctx, 'latest')).items.slice(0, 18); if (!latest.length) throw new Error('最新片单为空'); }
+  catch (e) { error = String(e && e.message || e); latest = fallbackItems(ctx); }
   return {
-    pageType: "home", id: "1808-home", title: "1808在线", heroAspectRatio: "2:3", hero: latest.slice(0, 6), items: latest,
-    sections: [{ ...CATEGORIES[0], lazy: false, items: latest, moreAction: categoryMoreAction(CATEGORIES[0]) }]
-      .concat(CATEGORIES.slice(1).map(v => ({
-        ...v, lazy: true, items: [], moreAction: categoryMoreAction(v),
-        loadAction: { type: "custom", sectionId: v.id, id: v.id, title: v.title }
-      })))
+    pageType: 'home', id: '1808-home', title: '1808在线', heroAspectRatio: '2:3', hero: latest.slice(0, 6), items: latest,
+    sections: [{ ...CATEGORIES[0], title: error ? '历史推荐（2026-07-18，实时加载失败）' : CATEGORIES[0].title,
+      lazy: false, items: latest, error: error || undefined, moreAction: categoryMoreAction(CATEGORIES[0]) }]
+      .concat(CATEGORIES.slice(1).map(v => ({ ...v, lazy: true, items: [], moreAction: categoryMoreAction(v),
+        loadAction: { type: 'custom', sectionId: v.id, id: v.id, title: v.title } })))
   };
 }
 
 async function getHomeSection(ctx) {
-  const id = String(value(ctx, ["sectionId", "pageId", "id"], "latest"));
+  const id = String(value(ctx, ['sectionId', 'pageId', 'id'], 'latest'));
   const category = CATEGORIES.find(v => v.id === id) || CATEGORIES[0];
-  let items = fallbackItems(ctx);
-  if (hasHTTPClient()) {
-    try {
-      const remote = (await loadCategory(ctx, category.id)).items.slice(0, 18);
-      if (remote.length) items = remote;
-    } catch (_) {}
-  }
-  return {
-    id: category.id, title: category.title, style: category.style, lazy: false, items,
-    moreAction: categoryMoreAction(category)
-  };
+  let items = []; let error = '';
+  try { items = (await loadCategory(ctx, category.id)).items.slice(0, 18); }
+  catch (e) { error = String(e && e.message || e); if (category.id === 'latest') items = fallbackItems(ctx); }
+  return { id: category.id, title: error && items.length ? '历史推荐（2026-07-18，实时加载失败）' : category.title,
+    style: category.style, lazy: false, items, error: error || undefined, moreAction: categoryMoreAction(category) };
 }
 
 async function getCategory(ctx) {
-  const id = String(value(ctx, ["pageId", "id"], "latest"));
+  const id = String(value(ctx, ['pageId', 'id'], 'latest'));
   const category = CATEGORIES.find(v => v.id === id) || CATEGORIES[0];
-  let items = fallbackItems(ctx);
-  if (hasHTTPClient()) {
-    try {
-      const remote = (await loadCategory(ctx, category.id)).items;
-      if (remote.length) items = remote;
-    } catch (_) {}
-  }
-  return { pageType: "category", id: category.id, title: category.title, style: "media.posterGrid", itemAspectRatio: "2:3", page: 1, hasMore: false, items };
+  let items = []; let error = '';
+  try { items = (await loadCategory(ctx, category.id)).items; } catch (e) { error = String(e && e.message || e); }
+  return { pageType: 'category', id: category.id, title: category.title, style: 'media.posterGrid', itemAspectRatio: '2:3', page: 1, hasMore: false, items, error: error || undefined };
 }
 
 async function getDetail(ctx) {
-  const id = movieId(value(ctx, ["itemId", "id", "sourceId", "path"], ""));
-  if (!id) throw new Error("缺少有效的电影详情地址");
-  let detail = fallbackDetail(ctx, id);
-  if (hasHTTPClient()) {
-    try {
-      const remote = parseDetailPage(ctx, await fetchText(ctx, id), id);
-      if (!remote.urls.length) remote.urls = syntheticPlaybackLines(ctx, id);
-      detail = remote;
-    } catch (_) {}
-  }
-  if (!detail.urls.length) throw new Error("详情页没有解析到播放线路");
-  const versions = detail.urls.map((v, index) => ({ id: v.url, title: v.title, name: v.title, url: v.url, container: "hls", default: index === 0, headers: playbackHeaders(v.referer), action: { type: "play", itemId: id, versionId: v.url, url: v.url, path: v.url, referer: v.referer, title: v.title } }));
-  return {
-    pageType: "detail", id, type: "movie", title: detail.title, poster: detail.poster, backdrop: detail.poster,
-    detailImageAspectRatio: "2:3", imageHeaders: imageHeaders(ctx, detail.referer), overview: detail.overview,
-    year: Number(detail.title.match(/(?:19|20)\d{2}/)?.[0]) || undefined, genres: ["剧情"],
-    cast: detail.actorText.split(/[，,、]/).filter(Boolean).slice(0, 20).map(name => ({ name: name.trim(), role: "演员" })),
-    resourceGroups: [{ id: "1808-lines", title: "播放线路", versions }],
-    recommendations: [{ id: "related", title: "相关推荐", style: "discover.posterCompact", items: detail.related }]
-  };
+  const id = movieId(value(ctx, ['itemId', 'id', 'sourceId', 'path'], ''));
+  if (!id) throw new Error('缺少有效的电影详情地址');
+  const detail = parseDetailPage(ctx, await fetchText(ctx, id), id);
+  if (!detail.urls.length) throw new Error('详情页没有返回真实播放线路，请刷新重试');
+  const lines = detail.urls.slice().sort((a, b) => lineQuality(b) - lineQuality(a));
+  const versions = lines.map((v, index) => ({ id: v.url, title: v.title, name: v.title, container: 'hls', default: index === 0,
+    headers: playbackHeaders(v.referer), action: { type: 'play', itemId: id, versionId: v.url, referer: v.referer, title: v.title } }));
+  return { pageType: 'detail', id, type: 'movie', title: detail.title, poster: detail.poster, backdrop: detail.poster,
+    detailImageAspectRatio: '2:3', imageHeaders: imageHeaders(ctx, detail.referer), overview: detail.overview,
+    year: Number(detail.title.match(/(?:19|20)\d{2}/)?.[0]) || undefined, genres: ['剧情'],
+    cast: detail.actorText.split(/[，,、]/).filter(Boolean).slice(0, 20).map(name => ({ name: name.trim(), role: '演员' })),
+    resourceGroups: [{ id: '1808-lines', title: '播放线路', versions }],
+    recommendations: [{ id: 'related', title: '相关推荐', style: 'discover.posterCompact', items: detail.related }] };
 }
 
 async function getResourceVersions(ctx) {
-  const direct = String(value(ctx, ["versionId", "resourceId", "url", "playUrl", "videoUrl"], ""));
-  if (/^https?:\/\//i.test(direct)) return { groups: [{ id: "1808-lines", title: "播放线路", versions: [{ id: direct, title: "在线播放", url: direct, container: "hls" }] }] };
   const detail = await getDetail(ctx);
   return { itemId: detail.id, groups: detail.resourceGroups };
 }
@@ -322,17 +275,25 @@ function playbackHeaders(referer) {
 
 async function resolvePlayback(ctx) {
   ctx = parseCtx(ctx);
-  let url = String(value(ctx, ["versionId", "resourceId", "url", "path", "playUrl", "videoUrl"], ""));
-  let referer = String(value(ctx, ["referer", "detailUrl"], ""));
-  if (!/^https?:\/\//i.test(url) || !/\.m3u8(?:\?|$)/i.test(url)) {
-    const id = movieId(value(ctx, ["itemId", "id", "sourceId"], ""));
-    if (!id) throw new Error("没有解析到电影 ID 或播放地址");
-    const lines = syntheticPlaybackLines(ctx, id);
-    if (!lines.length) throw new Error("没有解析到播放地址");
-    url = lines[0].url;
-    referer = lines[0].referer;
+  const id = movieId(value(ctx, ['itemId', 'id', 'sourceId'], ''));
+  const requested = String(value(ctx, ['versionId', 'resourceId', 'url', 'path', 'playUrl', 'videoUrl'], ''));
+  let url = requested; let referer = String(value(ctx, ['referer', 'detailUrl'], ''));
+  if (id) {
+    const detail = parseDetailPage(ctx, await fetchText(ctx, id), id);
+    const lines = detail.urls.slice().sort((a, b) => lineQuality(b) - lineQuality(a));
+    const quality = lineQuality({ url: requested });
+    const selected = lines.find(v => v.url === requested) || (quality && lines.find(v => lineQuality(v) === quality)) || lines[0];
+    if (!selected) throw new Error('源站没有返回可播放线路，请刷新重试');
+    url = selected.url; referer = selected.referer || detail.referer;
   }
-  return { url, container: "hls", headers: playbackHeaders(referer), startPositionSeconds: 0, isLive: false, streamKind: "vod" };
+  if (!/^https?:\/\//i.test(url) || !/\.m3u8(?:[?#]|$)/i.test(url)) throw new Error('没有解析到真实 HLS 播放地址');
+  if (!/#EXTM3U/.test(await fetchText(ctx, url, referer))) throw new Error('播放线路未返回有效 HLS 清单');
+  return { url, container: 'hls', headers: playbackHeaders(referer), startPositionSeconds: 0, isLive: false, streamKind: 'vod' };
+}
+
+function lineQuality(line) {
+  const m = String(line.title || '').match(/(\d{3,4})\s*p/i) || String(line.url || '').match(/(?:^|\/)(\d{3,4})(?:p|\/)/i);
+  return m ? Number(m[1]) : 0;
 }
 
 const api = {

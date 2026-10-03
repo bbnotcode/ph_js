@@ -12,7 +12,7 @@ const WidgetMetadata = {
   id: 'missav-mini-library',
   name: 'MissAV',
   title: 'MissAV',
-  version: '1.5.9',
+  version: '1.5.10',
   author: 'Alan huang',
   logo: MISSAV_LOGO,
   icon: MISSAV_LOGO,
@@ -748,11 +748,12 @@ async function getResourceVersions(ctx) {
   }
 }
 
-async function resolvePlayback(ctx) {
+async function resolvePlaybackWithinBudget(ctx) {
   ctx = normalizeContext(ctx);
   const requestedQuality = qualityFromContext(ctx);
   const direct = firstNonEmpty(playUrlFromContext(ctx), ctx && ctx.url, ctx && ctx.playUrl, ctx && ctx.videoUrl);
-  if (!requestedQuality && isPlayableURL(direct) && !isDetailPageURL(direct)) {
+  const stableDetailURL = detailUrlFromContext(ctx);
+  if (!isDetailPageURL(stableDetailURL) && !requestedQuality && isPlayableURL(direct) && !isDetailPageURL(direct)) {
     return playbackResult(ctx, direct, ctx && ctx.referer);
   }
 
@@ -764,16 +765,16 @@ async function resolvePlayback(ctx) {
   } catch (error) {
     // Playback has a separate, narrowly-scoped hidden browser media fallback.
   }
-  const masterURL = firstNonEmpty(
-    extractPlayableURL(html),
-    await extractPlayableFromLinkedPlayers(ctx, html, detailURL),
-    await extractFromBrowser(detailURL, detailURL)
-  );
+  let masterURL = extractPlayableURL(html);
+  if (!masterURL) masterURL = await extractPlayableFromLinkedPlayers(ctx, html, detailURL);
+  if (!masterURL) masterURL = await extractFromBrowser(detailURL, detailURL, ctx);
   let url = masterURL;
   if (masterURL) {
     let qualities = await discoverAvailableQualities(ctx, masterURL, detailURL, html);
-    if (qualities.length <= 1) {
-      const browserMasterURL = await extractFromBrowser(detailURL, detailURL);
+    const knownQuality = qualities.some(function (quality) { return quality.height > 0; });
+    const missingRequested = requestedQuality && !qualities.some(function (quality) { return String(quality.height) === String(requestedQuality); });
+    if ((!knownQuality || missingRequested) && ctx.__playbackBudget.browserCalls === 0) {
+      const browserMasterURL = await extractFromBrowser(detailURL, detailURL, ctx);
       if (browserMasterURL && browserMasterURL !== masterURL) {
         const browserQualities = await discoverAvailableQualities(ctx, browserMasterURL, detailURL, html);
         if (browserQualities.length > qualities.length) qualities = browserQualities;
@@ -1167,16 +1168,17 @@ async function safeFetch(ctx, url, referer) {
 }
 
 function requestOptions(ctx, referer) {
-  const timeout = numberParam(ctx, 'requestTimeoutSeconds', 45);
+  const timeout = remainingPlaybackSeconds(ctx, ctx && ctx.__playbackBudget ? 6 : numberParam(ctx, 'requestTimeoutSeconds', 45));
+  const browserFallback = !(ctx && ctx.__playbackBudget) && boolParam(ctx, 'enableBrowserFallback', true);
   return {
     headers: requestHeaders(ctx, referer),
     timeout: timeout,
     timeoutSeconds: timeout,
     useBrowserCookie: true,
     attachBrowserCookie: true,
-    useBrowserFallback: boolParam(ctx, 'enableBrowserFallback', true),
-    browserFallback: boolParam(ctx, 'enableBrowserFallback', true),
-    allowBrowserFallback: boolParam(ctx, 'enableBrowserFallback', true)
+    useBrowserFallback: browserFallback,
+    browserFallback: browserFallback,
+    allowBrowserFallback: browserFallback
   };
 }
 
@@ -1245,7 +1247,8 @@ async function browserHTML(ctx, url, referer, forceVisible) {
   try {
     const visible = forceVisible === true;
     const configuredTimeout = numberParam(ctx, 'requestTimeoutSeconds', 45);
-    const timeout = visible ? Math.min(configuredTimeout, 20) : configuredTimeout;
+    const timeout = playbackBrowserSeconds(ctx, visible ? Math.min(configuredTimeout, 20) : ctx && ctx.__playbackBudget ? Math.min(configuredTimeout, 12) : configuredTimeout, 1);
+    if (!timeout) return '';
     const result = await Widget.browser.fetch(url, {
       visible: visible,
       timeout: timeout,
@@ -1292,12 +1295,14 @@ function clearBrowserFailure(url) {
   cacheSet(browserFailureKey(url), { retryAfter: 0 });
 }
 
-async function extractFromBrowser(url, referer) {
+async function extractFromBrowser(url, referer, ctx) {
+  if (ctx && ctx.__playbackBudget && ctx.__playbackBudget.browserCalls >= 1) return '';
   if (typeof Widget === 'undefined' || !Widget.browser || typeof Widget.browser.fetch !== 'function') return '';
   try {
     const result = await Widget.browser.fetch(url, {
       visible: false,
-      timeout: 70,
+      timeout: playbackBrowserSeconds(ctx, 12, 1),
+      timeoutSeconds: remainingPlaybackSeconds(ctx, 12),
       waitAfterLoad: 3,
       waitForMediaSource: true,
       waitForAny: true,
@@ -2191,10 +2196,14 @@ async function discoverAvailableQualities(ctx, playlistURL, referer, html) {
   }
 
   const urls = unique(candidates.map(function (item) { return item.url; })).slice(0, 8);
-  for (let index = 0; index < urls.length; index += 1) {
-    const variants = await discoverQualities(ctx, urls[index], referer);
-    variants.forEach(function (quality) { candidates.push(quality); });
-  }
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(2, urls.length) }, async function () {
+    while (next < urls.length) {
+      remainingPlaybackSeconds(ctx, 5);
+      const variants = await discoverQualities(ctx, urls[next++], referer);
+      variants.forEach(function (quality) { candidates.push(quality); });
+    }
+  }));
   return normalizeQualities(candidates);
 }
 
@@ -2268,8 +2277,8 @@ async function discoverQualities(ctx, playlistURL, referer) {
   try {
     const response = await httpGet(playlistURL, {
       headers: playbackHeaders(ctx || {}, referer || playlistURL),
-      timeout: numberParam(ctx, 'requestTimeoutSeconds', 45),
-      timeoutSeconds: numberParam(ctx, 'requestTimeoutSeconds', 45),
+      timeout: remainingPlaybackSeconds(ctx, 5),
+      timeoutSeconds: remainingPlaybackSeconds(ctx, 5),
       useBrowserCookie: true,
       attachBrowserCookie: true
     });
@@ -3053,4 +3062,39 @@ if (typeof globalThis !== 'undefined') {
 
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = MissAVMiniLibrary;
+}
+
+async function withPlaybackBudget(input, operation) {
+  let ctx = input;
+  if (typeof ctx === 'string') { try { ctx = JSON.parse(ctx); } catch (_) { ctx = {}; } }
+  ctx = Object.assign({}, ctx && typeof ctx === 'object' ? ctx : {});
+  const budget = { endAt: Date.now() + 28000, expired: false, browserCalls: 0 };
+  ctx.__playbackBudget = budget;
+  let timer;
+  try {
+    const timeout = new Promise(function (_, reject) {
+      timer = setTimeout(function () { budget.expired = true; reject(new Error('播放解析超时；stage=total-deadline；请稍后重试')); }, 28000);
+    });
+    return await Promise.race([Promise.resolve().then(function () { return operation(ctx); }), timeout]);
+  } finally { clearTimeout(timer); budget.expired = true; }
+}
+
+function remainingPlaybackSeconds(ctx, limit) {
+  const budget = ctx && ctx.__playbackBudget;
+  if (!budget) return limit;
+  const remaining = (budget.endAt - Date.now()) / 1000;
+  if (budget.expired || remaining <= 0) throw new Error('播放解析超时；stage=total-deadline');
+  return Math.max(0.1, Math.min(limit, remaining));
+}
+
+function playbackBrowserSeconds(ctx, limit, maxCalls) {
+  const timeout = remainingPlaybackSeconds(ctx, limit);
+  const budget = ctx && ctx.__playbackBudget;
+  if (budget && budget.browserCalls >= maxCalls) throw new Error('浏览器回退次数已用完；stage=browser-fallback-limit');
+  if (budget) budget.browserCalls++;
+  return timeout;
+}
+
+async function resolvePlayback(input) {
+  return withPlaybackBudget(input, resolvePlaybackWithinBudget);
 }

@@ -8,7 +8,7 @@ const WidgetMetadata = {
   id: '591av-mini-library',
   name: '591AV',
   title: '591AV',
-  version: '1.3.1',
+  version: '1.3.2',
   requiredVersion: '0.0.1',
   author: 'Alan huang',
   site: AV591_DEFAULT_BASE,
@@ -81,8 +81,8 @@ async function getHome(ctx) {
     pageType: 'home', id: '591av-home', title: WidgetMetadata.title,
     heroAspectRatio: '16:9', hero: latest.slice(0, 6),
     sections: [{
-      id: 'browse', title: '分类浏览', style: 'discover.annualPosterStack', lazy: false,
-      items: await buildBrowseCards(ctx, latest)
+      id: 'browse', title: '分类浏览', style: 'discover.annualPosterStack', lazy: true,
+      loadAction: { type: 'custom', id: 'browse', sectionId: 'browse', title: '分类浏览' }, items: []
     }, {
       id: 'new', title: '最新上架', style: 'discover.spotlight', lazy: false,
       moreAction: categoryAction(AV591_SECTIONS[0]), items: latest,
@@ -97,32 +97,32 @@ async function getHome(ctx) {
   };
 }
 
-async function buildBrowseCards(ctx, fallbackItems) {
+async function buildBrowseCards(ctx) {
   const selected = AV591_BROWSE.slice(0, 6);
-  const cards = [];
-  for (let i = 0; i < selected.length; i += 1) {
-    const category = selected[i];
+  const cards = await mapBrowseCards(selected, async function (category) {
     let previews = [];
-    try {
-      previews = parseCards(await fetchText(ctx, listingURL(ctx, category, 1, 'post_date')), ctx).slice(0, 3);
-    } catch (_) {}
-    if (!previews.length) continue;
+    try { previews = parseCards(await fetchText(ctx, listingURL(ctx, category, 1, 'post_date')), ctx).slice(0, 3); } catch (_) {}
+    if (!previews.length) return null;
     const lead = previews[0];
-    cards.push({
-      id: category.id, title: category.title, type: 'collection',
-      poster: lead.poster, backdrop: lead.backdrop || lead.poster,
-      imageHeaders: lead.imageHeaders, posterHeaders: lead.posterHeaders,
-      backdropHeaders: lead.backdropHeaders, previewItems: previews,
-      action: {
-        type: 'category', id: category.id, pageId: category.id, title: category.title,
-        page: 1, currentPage: 1, itemAspectRatio: '16:9'
-      }
-    });
-  }
-  return cards;
+    return { id: category.id, title: category.title, type: 'collection', poster: lead.poster, backdrop: lead.backdrop || lead.poster,
+      imageHeaders: lead.imageHeaders, posterHeaders: lead.posterHeaders, backdropHeaders: lead.backdropHeaders, previewItems: previews,
+      action: { type: 'category', id: category.id, pageId: category.id, title: category.title, page: 1, currentPage: 1, itemAspectRatio: '16:9' } };
+  });
+  return cards.filter(Boolean);
+}
+
+async function mapBrowseCards(items, load) {
+  const results = new Array(items.length); let next = 0;
+  await Promise.all(Array.from({ length: Math.min(2, items.length) }, async function () {
+    while (next < items.length) { const index = next++; results[index] = await load(items[index]); }
+  }));
+  return results;
 }
 
 async function getHomeSection(ctx) {
+  if (value(ctx, ['sectionId', 'pageId', 'id'], 'new') === 'browse') {
+    return { id: 'browse', title: '分类浏览', style: 'discover.annualPosterStack', lazy: false, items: await buildBrowseCards(ctx, []) };
+  }
   const section = findSection(value(ctx, ['sectionId', 'pageId', 'id'], 'new')) || AV591_SECTIONS[0];
   try {
     const items = parseCards(await fetchText(ctx, listingURL(ctx, section, 1, section.sort || 'post_date')), ctx).slice(0, 20);
@@ -145,8 +145,8 @@ async function getCategory(ctx) {
   try {
     const sourcePage = (page - 1) * 2 + 1;
     const payloads = await Promise.all([
-      fetchText(ctx, listingURL(ctx, category, sourcePage, sort, true)).catch(function () { return ''; }),
-      fetchText(ctx, listingURL(ctx, category, sourcePage + 1, sort, true)).catch(function () { return ''; })
+      fetchText(ctx, listingURL(ctx, category, sourcePage, sort, true)),
+      fetchText(ctx, listingURL(ctx, category, sourcePage + 1, sort, true))
     ]);
     const firstHTML = payloads[0];
     const secondHTML = payloads[1];
@@ -178,7 +178,7 @@ async function getCategory(ctx) {
   } catch (error) {
     return {
       pageType: 'category', id: id, title: category.title, style: 'media.posterGrid',
-      itemAspectRatio: '16:9', page: page, hasMore: false,
+      itemAspectRatio: '16:9', page: page, hasMore: true, nextPage: page,
       selectedSortValue: sort, sort: AV591_SORTS, items: [], error: errorMessage(error)
     };
   }

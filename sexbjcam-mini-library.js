@@ -9,7 +9,7 @@ const WidgetMetadata = {
   id: 'sexbjcam-mini-library',
   name: 'SexBJCam',
   title: 'SexBJCam',
-  version: '1.1.7',
+  version: '1.1.8',
   author: 'Alan huang',
   logo: SEXBJCAM_LOGO,
   icon: SEXBJCAM_LOGO,
@@ -170,7 +170,7 @@ async function getResourceVersions(rawCtx) {
   };
 }
 
-async function resolvePlayback(rawCtx) {
+async function resolvePlaybackWithinBudget(rawCtx) {
   const ctx = normalizeContext(rawCtx);
   const detailURL = detailURLFromContext(ctx);
   let embedURL = embedURLFromContext(ctx);
@@ -501,7 +501,7 @@ async function loadSectionItems(ctx, section, page) {
 }
 
 async function fetchText(ctx, url, headers) {
-  const response = await httpRequest(url, headers || requestHeaders(ctx, url));
+  const response = await httpRequest(url, headers || requestHeaders(ctx, url), remainingPlaybackSeconds(ctx, 6));
   const text = unwrapText(response);
   if (!text) throw new Error('请求失败: ' + url);
   return text;
@@ -521,7 +521,8 @@ async function fetchPlayerText(ctx, url) {
     try {
       const result = await widget.browser.fetch(cacheBustedURL(url), {
         visible: false,
-        timeout: 60,
+        timeout: playbackBrowserSeconds(ctx, 12, 2),
+        timeoutSeconds: remainingPlaybackSeconds(ctx, 12),
         waitAfterLoad: 3,
         waitForAny: true,
         waitForMediaSource: true,
@@ -550,7 +551,8 @@ async function fetchSignedManifestText(ctx, url, headers) {
     try {
       const result = await widget.browser.fetch(url, {
         visible: false,
-        timeout: 30,
+        timeout: playbackBrowserSeconds(ctx, 6, 2),
+        timeoutSeconds: remainingPlaybackSeconds(ctx, 6),
         waitAfterLoad: 1,
         waitForAny: true,
         headers: headers
@@ -603,13 +605,13 @@ function cacheBustedURL(url) {
   return String(url || '') + separator + '_dreamby_refresh=' + Date.now() + '-' + SEXBJCAM_REQUEST_NONCE;
 }
 
-async function httpRequest(url, headers) {
+async function httpRequest(url, headers, timeout = 6) {
   const widget = typeof Widget !== 'undefined' ? Widget : null;
   const dollar = typeof $http !== 'undefined' ? $http : null;
   const client = (widget && widget.http) || dollar;
   if (!client) throw new Error('当前环境没有可用的 HTTP 客户端');
-  if (typeof client.get === 'function') return client.get(url, { headers: headers });
-  if (typeof client.request === 'function') return client.request({ url: url, method: 'GET', headers: headers });
+  if (typeof client.get === 'function') return client.get(url, { headers: headers, timeout, timeoutSeconds: timeout });
+  if (typeof client.request === 'function') return client.request({ url: url, method: 'GET', headers: headers, timeout, timeoutSeconds: timeout });
   throw new Error('当前 HTTP 客户端不支持 GET');
 }
 
@@ -817,3 +819,38 @@ const SEXBJCAM_API = {
 };
 if (typeof globalThis !== 'undefined') Object.keys(SEXBJCAM_API).forEach(function (key) { globalThis[key] = SEXBJCAM_API[key]; });
 if (typeof module !== 'undefined' && module.exports) module.exports = SEXBJCAM_API;
+
+async function withPlaybackBudget(input, operation) {
+  let ctx = input;
+  if (typeof ctx === 'string') { try { ctx = JSON.parse(ctx); } catch (_) { ctx = {}; } }
+  ctx = Object.assign({}, ctx && typeof ctx === 'object' ? ctx : {});
+  const budget = { endAt: Date.now() + 28000, expired: false, browserCalls: 0 };
+  ctx.__playbackBudget = budget;
+  let timer;
+  try {
+    const timeout = new Promise(function (_, reject) {
+      timer = setTimeout(function () { budget.expired = true; reject(new Error('播放解析超时；stage=total-deadline；请稍后重试')); }, 28000);
+    });
+    return await Promise.race([Promise.resolve().then(function () { return operation(ctx); }), timeout]);
+  } finally { clearTimeout(timer); budget.expired = true; }
+}
+
+function remainingPlaybackSeconds(ctx, limit) {
+  const budget = ctx && ctx.__playbackBudget;
+  if (!budget) return limit;
+  const remaining = (budget.endAt - Date.now()) / 1000;
+  if (budget.expired || remaining <= 0) throw new Error('播放解析超时；stage=total-deadline');
+  return Math.max(0.1, Math.min(limit, remaining));
+}
+
+function playbackBrowserSeconds(ctx, limit, maxCalls) {
+  const timeout = remainingPlaybackSeconds(ctx, limit);
+  const budget = ctx && ctx.__playbackBudget;
+  if (budget && budget.browserCalls >= maxCalls) throw new Error('浏览器回退次数已用完；stage=browser-fallback-limit');
+  if (budget) budget.browserCalls++;
+  return timeout;
+}
+
+async function resolvePlayback(input) {
+  return withPlaybackBudget(input, resolvePlaybackWithinBudget);
+}

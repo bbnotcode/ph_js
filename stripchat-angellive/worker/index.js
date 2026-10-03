@@ -66,23 +66,78 @@ const masterFailCache = new Map();
 
 /* -------------------------------- 工具 -------------------------------- */
 
-async function upstreamFetch(url, timeoutMs = 12000) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+async function upstreamFetch(url, timeoutMs = 12000, options = {}) {
+  const controller = new AbortController(); let timer; let rejectDeadline;
+  const deadline = new Promise((_, reject) => { rejectDeadline = reject; });
+  function cancel(reason) { controller.abort(); rejectDeadline(new Error(reason)); }
+  const externalAbort = () => cancel('upstream probe cancelled');
+  if (options.signal) {
+    if (options.signal.aborted) throw new Error('upstream probe cancelled');
+    options.signal.addEventListener('abort', externalAbort, { once: true });
+  }
+  timer = setTimeout(() => cancel('upstream request timed out'), timeoutMs);
   try {
-    return await fetch(url, {
-      headers: {
-        "User-Agent": UA,
-        "Referer": "https://stripchat.com/",
-        "Accept": "*/*",
-        "Accept-Encoding": "identity"
-      },
-      redirect: "manual",
-      signal: controller.signal
-    });
+    const operation = (async () => {
+      const response = await fetch(url, { headers: { 'User-Agent': UA, Referer: 'https://stripchat.com/', Accept: '*/*', 'Accept-Encoding': 'identity' }, redirect: 'manual', signal: controller.signal });
+      if (!options.read) return response; // Media segments stay streaming.
+      if (!response.ok) { if (response.body) await response.body.cancel().catch(() => {}); return { response, body: '' }; }
+      const body = await readSmallBody(response, controller.signal);
+      return { response, body: options.read === 'json' ? JSON.parse(body) : body };
+    })();
+    return await Promise.race([operation, deadline]);
   } finally {
     clearTimeout(timer);
+    if (options.signal) options.signal.removeEventListener('abort', externalAbort);
   }
+}
+
+async function readSmallBody(response, signal) {
+  const limit = 1024 * 1024;
+  if (!response.body || typeof response.body.getReader !== 'function') {
+    const text = await response.text();
+    if (new TextEncoder().encode(text).length > limit) throw new Error('upstream playlist/JSON exceeds size limit');
+    return text;
+  }
+  const reader = response.body.getReader(); const chunks = []; let size = 0;
+  const cancel = () => { reader.cancel().catch(() => {}); };
+  signal.addEventListener('abort', cancel, { once: true });
+  try {
+    while (true) {
+      const part = await reader.read();
+      if (signal.aborted) throw new Error('upstream body read cancelled');
+      if (part.done) break;
+      size += part.value.byteLength;
+      if (size > limit) { await reader.cancel(); throw new Error('upstream playlist/JSON exceeds size limit'); }
+      chunks.push(part.value);
+    }
+    const bytes = new Uint8Array(size); let offset = 0;
+    for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+    return new TextDecoder().decode(bytes);
+  } finally { signal.removeEventListener('abort', cancel); reader.releaseLock(); }
+}
+
+async function firstSuccessful(values, probe) {
+  const controllers = values.map(() => new AbortController());
+  const results = new Array(values.length);
+  if (!values.length) return { hit: null, results: [] };
+  return new Promise(resolve => {
+    let completed = 0; let settled = false;
+    values.forEach((value, index) => {
+      Promise.resolve().then(() => probe(value, controllers[index].signal)).catch(() => ({ ok: false, why: 'upstream probe failed' })).then(result => {
+        results[index] = result; completed++;
+        if (settled) return;
+        if (result.ok) {
+          settled = true;
+          controllers.forEach((controller, other) => { if (other !== index) controller.abort(); });
+          resolve({ hit: result, results });
+        } else if (completed === values.length) { settled = true; resolve({ hit: null, results }); }
+      });
+    });
+  });
+}
+
+function logStage(stage, startedAt, ok) {
+  console.log(JSON.stringify({ stage, durationMs: Date.now() - startedAt, ok }));
 }
 
 function json(body, status = 200) {
@@ -109,9 +164,8 @@ async function getKeys(env) {
 
   keyInflight = (async () => {
     try {
-      const res = await upstreamFetch(KEY_URL, 8000);
+      const { response: res, body: parsed } = await upstreamFetch(KEY_URL, 8000, { read: 'json' });
       if (res.ok) {
-        const parsed = await res.json();
         if (parsed && parsed.keys && Object.keys(parsed.keys).length) {
           keyCache = { at: Date.now(), keys: { ...bundled, ...parsed.keys } };
           return keyCache.keys;
@@ -188,12 +242,12 @@ function parseMaster(bodyText, baseURL) {
   return { pkeys, variants };
 }
 
-async function probeMaster(streamId, tld, keys) {
+async function probeMaster(streamId, tld, keys, signal) {
   const url = `https://edge-hls.doppiocdn.${tld}/hls/${streamId}/master/${streamId}_auto.m3u8`;
   try {
-    const res = await upstreamFetch(url, MASTER_FETCH_TIMEOUT_MS);
+    const { response: res, body } = await upstreamFetch(url, MASTER_FETCH_TIMEOUT_MS, { read: 'text', signal });
     if (!res.ok) return { ok: false, why: `${tld}: HTTP ${res.status}` };
-    const parsed = parseMaster(await res.text(), url);
+    const parsed = parseMaster(body, url);
     if (!parsed.variants.length) return { ok: false, why: `${tld}: 无画质变体` };
     const known = parsed.pkeys.find((pair) => keys[pair.key]);
     if (!known) return { ok: false, why: `${tld}: master 给出的 pkey 无匹配 pdkey` };
@@ -220,8 +274,9 @@ async function loadMaster(streamId, env) {
 
   const keys = await getKeys(env);
   // 4 个 CDN 域名并发探，最坏耗时从 36s 降到单个超时。
-  const results = await Promise.all(EDGE_TLDS.map((tld) => probeMaster(streamId, tld, keys)));
-  const hit = results.find((item) => item.ok);
+  const startedAt = Date.now();
+  const { hit, results } = await firstSuccessful(EDGE_TLDS, (tld, signal) => probeMaster(streamId, tld, keys, signal));
+  logStage('master', startedAt, !!hit);
   if (hit) {
     masterCache.set(streamId, { at: Date.now(), data: hit.data });
     masterFailCache.delete(streamId);
@@ -385,12 +440,11 @@ function alternateHosts(url) {
   return list;
 }
 
-async function tryVariantCandidate(candidate, attempts) {
+async function tryVariantCandidate(candidate, attempts, signal) {
   try {
-    const res = await upstreamFetch(candidate, 6000);
-    const body = res.ok ? await res.text() : "";
+    const { response: res, body } = await upstreamFetch(candidate, 6000, { read: 'text', signal });
     const decoy = MOUFLON_ADVERT.test(body);
-    if (res.ok && !decoy) return { ok: true, body, url: candidate };
+    if (res.ok && /^\s*#EXTM3U/.test(body) && !decoy) return { ok: true, body, url: candidate };
     attempts.push(`${new URL(candidate).host} -> ${res.status}${decoy ? " (广告诱饵清单)" : ""}`);
   } catch (error) {
     attempts.push(`${new URL(candidate).host} -> ${error && error.message}`);
@@ -399,21 +453,19 @@ async function tryVariantCandidate(candidate, attempts) {
 }
 
 async function fetchVariantPlaylist(master, variant, env) {
-  const attempts = [];
-  // 第一轮并发探所有 CDN 域名：最常见的情况是第一个就命中，最坏也只有一个超时周期。
-  const first = await Promise.all(alternateHosts(variantURL(master, variant)).map((candidate) => tryVariantCandidate(candidate, attempts)));
-  const hit = first.find((item) => item.ok);
-  if (hit) return hit;
-
+  const attempts = []; const startedAt = Date.now();
+  const first = await firstSuccessful(alternateHosts(variantURL(master, variant)), (candidate, signal) => tryVariantCandidate(candidate, attempts, signal));
+  if (first.hit) { logStage('variant', startedAt, true); return { ...first.hit, master }; }
   masterCache.delete(master.streamId);
-  await new Promise((resolve) => setTimeout(resolve, 300));
-  const second = await Promise.all(alternateHosts(variantURL(master, variant)).map((candidate) => tryVariantCandidate(candidate, attempts)));
-  const retry = second.find((item) => item.ok);
-  if (retry) return retry;
-  return { ok: false, attempts };
+  let fresh;
+  try { fresh = await loadMaster(master.streamId, env); }
+  catch (_) { logStage('variant', startedAt, false); return { ok: false, attempts: attempts.concat('master refresh failed') }; }
+  const selected = fresh.variants.find(item => item.name === variant.name) || fresh.variants.find(item => item.height === variant.height);
+  if (!selected) { logStage('variant', startedAt, false); return { ok: false, attempts: attempts.concat('refreshed master has no matching quality') }; }
+  const second = await firstSuccessful(alternateHosts(variantURL(fresh, selected)), (candidate, signal) => tryVariantCandidate(candidate, attempts, signal));
+  logStage('variant', startedAt, !!second.hit);
+  return second.hit ? { ...second.hit, master: fresh } : { ok: false, attempts };
 }
-
-/* -------------------------------- 路由 -------------------------------- */
 
 async function handleIndex(request, streamId, env, ctx) {
   const origin = new URL(request.url).origin;
@@ -479,7 +531,8 @@ async function handleVariantPlaylist(streamId, name, env, ctx, request) {
       "上游媒体清单不可用（已重试多个 CDN 节点）：\n" + outcome.attempts.join("\n") +
       "\n\n403/302 通常是该 CDN 节点暂时不可用或对本出口限流，换一个主播或过几分钟再试。", 502);
   }
-  const rewritten = await rewriteMediaPlaylist(outcome.body, outcome.url, master.pkey, master.pdkey, segmentMode(env));
+  const activeMaster = outcome.master || master;
+  const rewritten = await rewriteMediaPlaylist(outcome.body, outcome.url, activeMaster.pkey, activeMaster.pdkey, segmentMode(env));
   if (!rewritten.segmentCount) return text("上游清单里没有可解密的 Mouflon 分片", 502);
   const response = new Response(rewritten.playlist, {
     status: 200,
@@ -701,6 +754,7 @@ export default {
 
 // 仅供本地单元测试导入；不会成为 Worker 的 HTTP 路由或公开接口。
 export const __test = {
+  upstreamFetch, firstSuccessful, loadMaster, fetchVariantPlaylist, handleVariantPlaylist, masterCache, masterFailCache,
   compactSegmentTarget,
   decodeSegmentParam,
   decryptSegmentURL,

@@ -785,7 +785,7 @@ WidgetMetadata = {
     id: '91porny_int',
     title: '91Porny',
     description: '91Porny',
-    version: "0.9.6",
+    version: "0.9.7",
     requiredVersion: '0.0.1',
     author: "網路",
     site: 'https://github.com/baranwang/forward-widget',
@@ -1090,7 +1090,7 @@ async function search(params) {
     (_params1 = params).page || (_params1.page = 1);
     (_params2 = params).base_url || (_params2.base_url = DEFAULT_BASE_URL);
     try {
-        const $ = await widgetAPI.getHtml(`${params.base_url}/search?keywords=${params.keyword}&page=${params.page}`);
+        const $ = await widgetAPI.getHtml(`${params.base_url}/search?keywords=${encodeURIComponent(params.keyword)}&page=${params.page}`);
         return getVideoList($, params.base_url);
     } catch (error) {
         console.error("视频列表加载失败", error);

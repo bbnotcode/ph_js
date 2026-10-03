@@ -16,7 +16,7 @@ const XXXFOLLOW_TAGS = [
 ];
 
 const WidgetMetadata = {
-  id: 'xxxfollow-mini-library', name: 'XXXFollow', title: 'XXXFollow', version: '1.0.0', author: 'EL',
+  id: 'xxxfollow-mini-library', name: 'XXXFollow', title: 'XXXFollow', version: '1.0.1', author: 'Alan huang',
   logo: XXXFOLLOW_BASE + '/favicon.ico', icon: XXXFOLLOW_BASE + '/favicon.ico', site: XXXFOLLOW_BASE,
   description: 'XXXFollow 短视频聚合自定义媒体库。'
 };
@@ -35,6 +35,7 @@ function getManifest() {
 }
 
 async function getHome(ctx) {
+  ctx = normalizeRuntimeContext(ctx);
   let items = [];
   try { items = await loadFeed(ctx, '', 1); } catch (_) {}
   return {
@@ -49,6 +50,7 @@ async function getHome(ctx) {
 }
 
 async function getHomeSection(ctx) {
+  ctx = normalizeRuntimeContext(ctx);
   const id = stringValue(ctx && (ctx.sectionId || ctx.id));
   if (id === 'tags') return { id: 'tags', title: '标签', style: 'discover.annualCategories', lazy: false, items: XXXFOLLOW_TAGS.map(function (tag) { return { id: 'tag-' + tag[0], title: tag[1], type: 'category', action: { type: 'category', pageId: 'tag:' + tag[0], title: tag[1] } }; }) };
   try { return { id: 'for-you', title: '推荐', style: 'discover.spotlight', lazy: false, items: await loadFeed(ctx, '', 1) }; }
@@ -56,6 +58,7 @@ async function getHomeSection(ctx) {
 }
 
 async function getCategory(ctx) {
+  ctx = normalizeRuntimeContext(ctx);
   const raw = stringValue(ctx && (ctx.pageId || ctx.id || ctx.category || ctx.genreId));
   const page = positiveInt(contextValue(ctx, 'page'), 1);
   const tag = raw.indexOf('tag:') === 0 ? raw.slice(4) : '';
@@ -64,30 +67,29 @@ async function getCategory(ctx) {
 }
 
 async function getDetail(ctx) {
+  ctx = normalizeRuntimeContext(ctx);
   const item = await findItem(ctx);
   if (!item) throw new Error('XXXFollow 找不到视频详情');
   return detailObject(ctx, item);
 }
 
 async function getResourceVersions(ctx) {
+  ctx = normalizeRuntimeContext(ctx);
   const item = await findItem(ctx);
   if (!item) return [];
   return resourceGroups(ctx, item);
 }
 
 async function resolvePlayback(ctx) {
-  let url = directURL(ctx);
-  let item;
-  if (!url) {
-    const cachedId = normalizeItemId(ctx);
-    url = cachedId && XXXFOLLOW_VIDEO_CACHE[cachedId];
-  }
-  if (!url) { item = await findItem(ctx); url = item && item.videoUrl; }
-  if (!url) throw new Error('没有解析到 XXXFollow 播放地址');
+  ctx = normalizeRuntimeContext(ctx);
+  const item = await findItem(ctx, true);
+  const url = item && item.videoUrl;
+  if (!url) throw new Error('没有解析到 XXXFollow 播放地址，请重新打开视频或所属标签');
   return { url: decodeURL(url), container: /\.m3u8(?:$|[?#])/i.test(url) ? 'm3u8' : 'mp4', headers: mediaHeaders(ctx), startPositionSeconds: 0, isLive: false, streamKind: /\.m3u8(?:$|[?#])/i.test(url) ? 'hls' : 'file' };
 }
 
 async function search(ctx) {
+  ctx = normalizeRuntimeContext(ctx);
   const query = clean(contextValue(ctx, 'query') || contextValue(ctx, 'keyword') || contextValue(ctx, 'text'));
   const page = positiveInt(contextValue(ctx, 'page'), 1);
   if (!query) return { pageType: 'search', title: '搜索结果', keyword: '', page: page, hasMore: false, items: [] };
@@ -99,26 +101,37 @@ function getSearch(ctx) { return search(ctx); }
 function play(ctx) { return resolvePlayback(ctx); }
 function getPlayback(ctx) { return resolvePlayback(ctx); }
 
-async function findItem(ctx) {
-  const givenURL = directURL(ctx);
+async function findItem(ctx, refresh) {
   const id = normalizeItemId(ctx);
   const embedded = playbackPayload(rawPlaybackId(ctx));
-  if (embedded.url) return {
-    id: embedded.id || id,
-    sourceId: embedded.id || id,
-    videoUrl: embedded.url,
-    poster: embedded.poster || stringValue(ctx && (ctx.poster || ctx.backdrop)),
-    backdrop: embedded.poster || stringValue(ctx && (ctx.backdrop || ctx.poster)),
-    title: embedded.title || stringValue(ctx && ctx.title) || id
-  };
-  if (id && XXXFOLLOW_VIDEO_CACHE[id]) return { id: id, videoUrl: XXXFOLLOW_VIDEO_CACHE[id], title: stringValue(ctx && ctx.title) || id };
-  if (givenURL && id && !/^https?:\/\//i.test(id)) return { id: id, videoUrl: givenURL, title: stringValue(ctx.title) || id };
-  const html = await fetchText(ctx, baseURL(ctx));
-  const state = extractPreloadState(html);
-  const found = findById(state, id);
-  if (found) return found;
-  if (givenURL) return { id: id || givenURL, videoUrl: givenURL, title: stringValue(ctx.title) || id || 'XXXFollow' };
+  const cached = id && XXXFOLLOW_VIDEO_CACHE[id];
+  if (!refresh && cached && cached.at && Date.now() - cached.at < 30000) return cached.item;
+  const pages = [baseURL(ctx)];
+  const hint = cached && cached.tag || stringValue(embedded.tag);
+  if (hint) pages.unshift(feedURL(ctx, hint, 1));
+  for (const url of pages) {
+    try {
+      const item = findById(extractPreloadState(await fetchText(ctx, url)), id);
+      if (item) return item;
+    } catch (error) { if (!refresh && !embedded.url) throw error; }
+  }
+  if (refresh) {
+    // Old payloads may describe videos outside the current feed. Validate that
+    // fallback URL now, so an expired cached address cannot masquerade as success.
+    const fallback = embedded.url || directURL(ctx);
+    if (fallback && await validateDirectMedia(ctx, fallback)) return { id, videoUrl: fallback, title: embedded.title || ctx.title || id };
+    return null;
+  }
+  if (embedded.url) return { id: embedded.id || id, videoUrl: embedded.url, poster: embedded.poster, title: embedded.title || id };
   return null;
+}
+
+async function validateDirectMedia(ctx, url) {
+  try {
+    const response = await Widget.http.get(url, { headers: Object.assign({}, mediaHeaders(ctx), { Range: 'bytes=0-0' }), timeout: 5, timeoutSeconds: 5 });
+    const status = Number(response && (response.status || response.statusCode));
+    return status >= 200 && status < 300;
+  } catch (_) { return false; }
 }
 
 function detailObject(ctx, item) {
@@ -154,7 +167,11 @@ function parseItem(ctx, item) {
   const poster = absolute(ctx, first.thumb_url || first.start_url || ''); const tags = Array.isArray(post.tags) ? post.tags : [];
   const genres = tags.map(function (t) { return clean(t && (t.display || t.tag)); }).filter(Boolean);
   const videoUrl = decodeURL(video);
-  if (id && videoUrl) XXXFOLLOW_VIDEO_CACHE[id] = videoUrl;
+  if (id && videoUrl) {
+    const cachedItem = { id, sourceId: id, videoUrl, poster, title: clean(post.text || id), genres };
+    XXXFOLLOW_VIDEO_CACHE[id] = { item: cachedItem, at: Date.now(), tag: tags[0] && (tags[0].tag || tags[0]) || '' };
+    const keys = Object.keys(XXXFOLLOW_VIDEO_CACHE); if (keys.length > 100) delete XXXFOLLOW_VIDEO_CACHE[keys[0]];
+  }
   const payload = makePlaybackPayload(id, videoUrl, poster, clean(post.text || id));
   return { id: payload, sourceId: id, title: clean(post.text || 'Video ' + id).slice(0, 120), poster: poster, backdrop: poster, videoUrl: videoUrl, duration: Number(first.duration_in_second || 0), rating: Math.min(10, Math.round(Number(item.like_count || 0) / 2000)), genres: genres, overview: clean(post.text || ''), action: { type: 'detail', itemId: payload, id: payload, title: clean(post.text || id), url: videoUrl, playUrl: videoUrl, videoUrl: videoUrl } };
 }
@@ -224,3 +241,16 @@ function clean(value) { return stringValue(value).replace(/<[^>]+>/g, ' ').repla
 const XXXFOLLOW_API = { getManifest, getHome, getHomeSection, getCategory, getDetail, getResourceVersions, resolvePlayback, search, onSearch, getSearch, play, getPlayback };
 if (typeof globalThis !== 'undefined') Object.keys(XXXFOLLOW_API).forEach(function (key) { globalThis[key] = XXXFOLLOW_API[key]; });
 if (typeof module !== 'undefined' && module.exports) module.exports = XXXFOLLOW_API;
+
+function normalizeRuntimeContext(input) {
+  let ctx = input;
+  if (typeof ctx === 'string') { try { ctx = JSON.parse(ctx); } catch (_) { ctx = {}; } }
+  if (!ctx || typeof ctx !== 'object' || Array.isArray(ctx)) return {};
+  const nested = {};
+  ['params', 'config', 'settings', 'parameters', 'pagination', 'pageInfo'].forEach(function (key) {
+    let bag = ctx[key];
+    if (typeof bag === 'string') { try { bag = JSON.parse(bag); } catch (_) { bag = null; } }
+    if (bag && typeof bag === 'object' && !Array.isArray(bag)) Object.keys(bag).forEach(function (name) { if (nested[name] === undefined) nested[name] = bag[name]; });
+  });
+  return Object.assign(nested, ctx);
+}

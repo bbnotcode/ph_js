@@ -4,6 +4,7 @@ const MISSAV_DEFAULT_BASE = 'https://missav.ws';
 const MISSAV_DEFAULT_ENTRY = '/dm247/cn';
 const MISSAV_LOGO = 'https://missav.ws/favicon.ico';
 const MISSAV_DETAIL_PAYLOAD_PREFIX = 'missav://detail?';
+const MISSAV_VERIFY_PAYLOAD_PREFIX = 'missav://verify?';
 const MISSAV_UA =
   'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';
 
@@ -11,8 +12,8 @@ const WidgetMetadata = {
   id: 'missav-mini-library',
   name: 'MissAV',
   title: 'MissAV',
-  version: '1.0.7',
-  author: 'alanhuang',
+  version: '1.5.10',
+  author: 'Alan huang',
   logo: MISSAV_LOGO,
   icon: MISSAV_LOGO,
   site: MISSAV_DEFAULT_BASE,
@@ -20,43 +21,72 @@ const WidgetMetadata = {
 };
 
 const MISSAV_SECTIONS = [
-  { id: 'new-release', title: '新作上市', path: '/new', style: 'discover.spotlight' },
-  { id: 'latest', title: '最近更新', path: '/new?sort=published_at', style: 'discover.ranked' },
-  { id: 'chinese-subtitle', title: '中文字幕', path: '/chinese-subtitle', style: 'discover.posterCompact' },
-  { id: 'uncensored-leak', title: '无码流出', aliases: ['无码影片'], path: '/uncensored-leak', style: 'discover.posterCompact' },
-  { id: 'today-hot', title: '今日热门', path: '/today-hot', style: 'discover.ranked' },
-  { id: 'weekly-hot', title: '本周热门', path: '/weekly-hot', style: 'discover.ranked' },
-  { id: 'monthly-hot', title: '本月热门', path: '/monthly-hot', style: 'discover.ranked' },
-  { id: 'fc2', title: 'FC2', path: '/fc2', style: 'discover.posterCompact' },
-  { id: 'heyzo', title: 'HEYZO', path: '/heyzo', style: 'discover.posterCompact' },
-  { id: 'tokyo-hot', title: '东京热', path: '/tokyo-hot', style: 'discover.posterCompact' },
-  { id: '1pondo', title: '一本道', path: '/1pondo', style: 'discover.posterCompact' },
-  { id: 'caribbeancom', title: 'Caribbeancom', path: '/caribbeancom', style: 'discover.posterCompact' },
-  { id: 'caribbeancompr', title: 'Caribbeancompr', path: '/caribbeancompr', style: 'discover.posterCompact' },
-  { id: '10musume', title: '10musume', path: '/10musume', style: 'discover.posterCompact' },
-  { id: 'pacopacomama', title: 'pacopacomama', path: '/pacopacomama', style: 'discover.posterCompact' },
-  { id: 'gachinco', title: 'Gachinco', path: '/gachinco', style: 'discover.posterCompact' },
-  { id: 'xxx-av', title: 'XXX-AV', path: '/xxx-av', style: 'discover.posterCompact' },
-  { id: 'siro', title: 'SIRO', path: '/siro', style: 'discover.posterCompact' },
-  { id: 'luxu', title: 'LUXU', path: '/luxu', style: 'discover.posterCompact' },
-  { id: 'gana', title: 'GANA', path: '/gana', style: 'discover.posterCompact' },
-  { id: 'prestige-premium', title: 'PRESTIGE PREMIUM', path: '/prestige-premium', style: 'discover.posterCompact' },
-  { id: 's-cute', title: 'S-CUTE', path: '/s-cute', style: 'discover.posterCompact' },
-  { id: 'ara', title: 'ARA', path: '/ara', style: 'discover.posterCompact' },
-  { id: 'madou', title: '麻豆传媒', path: '/madou', style: 'discover.posterCompact' },
-  { id: 'twav', title: 'TWAV', path: '/twav', style: 'discover.posterCompact' },
-  { id: 'vr', title: 'VR', path: '/vr', style: 'discover.posterCompact' }
+  { id: 'recommended', title: '推荐给你', path: '/', style: 'discover.spotlight', group: 'japanese', personalizedHome: true, randomCategory: true },
+  { id: 'nakadashi', title: '中出', path: '/cn/search/%E4%B8%AD%E5%87%BA', style: 'discover.posterCompact', group: 'japanese', eagerPagination: true },
+  { id: 'big-breasts', title: '巨乳', path: '/cn/search/%E5%B7%A8%E4%B9%B3', style: 'discover.posterCompact', group: 'japanese', eagerPagination: true },
+  { id: 'married-women', title: '人妻', path: '/cn/search/%E4%BA%BA%E5%A6%BB', style: 'discover.posterCompact', group: 'japanese', eagerPagination: true },
+  { id: 'chinese-subtitle', title: '中文字幕', path: '/dm278/cn/chinese-subtitle', style: 'discover.posterCompact', group: 'japanese' },
+  { id: 'latest', title: '最近更新', path: '/dm539/cn/new', style: 'discover.ranked', group: 'japanese', eagerPagination: true },
+  { id: 'new-release', title: '新作上市', path: '/dm635/cn/release', style: 'discover.spotlight', group: 'japanese', eagerPagination: true },
+  { id: 'random', title: '随机', aliases: ['好手气'], path: '/random', style: 'discover.posterCompact', group: 'japanese', randomCategory: true },
+  { id: 'uncensored-leak', title: '无码流出', aliases: ['无码影片'], path: '/dm817/cn/uncensored-leak', style: 'discover.posterCompact', group: 'uncensored' },
+  { id: 'actresses', title: '女优一览', path: '/cn/actresses', style: 'discover.posterCompact', group: 'japanese', categoryIndex: true },
+  { id: 'actress-ranking', title: '女优排行', path: '/cn/actresses/ranking', style: 'discover.ranked', group: 'japanese', categoryIndex: true },
+  { id: 'genres', title: '类型', path: '/cn/genres', style: 'discover.posterCompact', group: 'japanese', categoryIndex: true },
+  { id: 'makers', title: '发行商', path: '/cn/makers', style: 'discover.posterCompact', group: 'japanese', categoryIndex: true },
+  { id: 'vr', title: 'VR', path: '/cn/genres/VR', style: 'discover.posterCompact', group: 'japanese' },
+  { id: 'today-hot', title: '今日热门', path: '/dm301/cn/today-hot', style: 'discover.ranked', group: 'japanese', eagerPagination: true },
+  { id: 'weekly-hot', title: '本周热门', aliases: ['本週热门'], path: '/dm170/cn/weekly-hot', style: 'discover.ranked', group: 'japanese', eagerPagination: true },
+  { id: 'monthly-hot', title: '本月热门', path: '/dm273/cn/monthly-hot', style: 'discover.ranked', group: 'japanese', eagerPagination: true },
+
+  { id: 'siro', title: 'SIRO', path: '/dm36/cn/siro', style: 'discover.posterCompact', group: 'amateur' },
+  { id: 'luxu', title: 'LUXU', path: '/dm34/cn/luxu', style: 'discover.posterCompact', group: 'amateur' },
+  { id: 'gana', title: 'GANA', path: '/dm34/cn/gana', style: 'discover.posterCompact', group: 'amateur' },
+  { id: 'prestige-premium', title: 'PRESTIGE PREMIUM', aliases: ['MAAN'], path: '/dm1004/cn/maan', style: 'discover.posterCompact', group: 'amateur' },
+  { id: 's-cute', title: 'S-CUTE', aliases: ['SCUTE'], path: '/dm38/cn/scute', style: 'discover.posterCompact', group: 'amateur' },
+  { id: 'ara', title: 'ARA', path: '/dm34/cn/ara', style: 'discover.posterCompact', group: 'amateur' },
+
+  { id: 'fc2', title: 'FC2', path: '/dm597/cn/fc2', style: 'discover.posterCompact', group: 'uncensored' },
+  { id: 'heyzo', title: 'HEYZO', path: '/dm2208642/cn/heyzo', style: 'discover.posterCompact', group: 'uncensored' },
+  { id: 'tokyo-hot', title: '东京热', aliases: ['TOKYOHOT'], path: '/dm42/cn/tokyohot', style: 'discover.posterCompact', group: 'uncensored' },
+  { id: '1pondo', title: '一本道', path: '/dm5199603/cn/1pondo', style: 'discover.posterCompact', group: 'uncensored', artworkCodePrefixes: ['pondo-'], detailSlugPattern: '^pondo-\\d{6}_\\d{3}$' },
+  { id: 'caribbeancom', title: 'Caribbeancom', path: '/dm7704788/cn/caribbeancom', style: 'discover.posterCompact', group: 'uncensored' },
+  { id: 'caribbeancompr', title: 'Caribbeancompr', path: '/dm91887/cn/caribbeancompr', style: 'discover.posterCompact', group: 'uncensored', detailSlugPattern: '^\\d{6}_\\d{3}$' },
+  { id: '10musume', title: '10musume', path: '/dm7208981/cn/10musume', style: 'discover.posterCompact', group: 'uncensored', artworkCodePrefixes: ['musume-'], detailSlugPattern: '^musume-\\d{6}_\\d{2}$' },
+  { id: 'pacopacomama', title: 'pacopacomama', path: '/dm3600557/cn/pacopacomama', style: 'discover.posterCompact', group: 'uncensored', artworkCodePrefixes: ['pacopacomama-'], detailSlugPattern: '^pacopacomama-\\d{6}_\\d{3}$' },
+  { id: 'gachinco', title: 'Gachinco', path: '/dm150/cn/gachinco', style: 'discover.posterCompact', group: 'uncensored', artworkCodePrefixes: ['gachi'] },
+  { id: 'xxx-av', title: 'XXX-AV', aliases: ['XXXAV'], path: '/dm42/cn/xxxav', style: 'discover.posterCompact', group: 'uncensored' },
+  { id: 'marriedslash', title: '人妻斩', path: '/dm37/cn/marriedslash', style: 'discover.posterCompact', group: 'uncensored', artworkCodePrefixes: ['c0930-'] },
+  { id: 'naughty4610', title: '顽皮 4610', path: '/dm33/cn/naughty4610', style: 'discover.posterCompact', group: 'uncensored', artworkCodePrefixes: ['h4610-'] },
+  { id: 'naughty0930', title: '顽皮 0930', path: '/dm37/cn/naughty0930', style: 'discover.posterCompact', group: 'uncensored', artworkCodePrefixes: ['h0930-'] },
+
+  { id: 'madou', title: '麻豆传媒', path: '/dm63/cn/madou', style: 'discover.posterCompact', group: 'asian' },
+  { id: 'twav', title: 'TWAV', path: '/dm31/cn/twav', style: 'discover.posterCompact', group: 'asian' },
+  { id: 'furuke', title: 'Furuke', path: '/dm15/cn/furuke', style: 'discover.posterCompact', group: 'asian' },
+  { id: 'klive', title: '韩国直播', path: '/cn/klive', style: 'discover.posterCompact', group: 'asian' },
+  { id: 'clive', title: '中国直播', path: '/cn/clive', style: 'discover.posterCompact', group: 'asian' }
 ];
 
-const MISSAV_PRIMARY_CATEGORIES = [
-  { id: 'latest', title: '最近更新', path: '/new?sort=published_at', subtitle: '按发布时间更新' },
-  { id: 'new-release', title: '新作上市', path: '/new', subtitle: '最新上架作品' },
-  { id: 'uncensored-leak', title: '无码流出', path: '/uncensored-leak', subtitle: '无码流出专区' },
-  { id: 'actresses', title: '女优一览', path: '/actresses', subtitle: '按女优浏览' },
-  { id: 'actress-ranking', title: '女优排行', path: '/actresses/ranking', subtitle: '站内女优排行' },
-  { id: 'genres', title: '类型', path: '/genres', subtitle: '按题材类型浏览' },
-  { id: 'makers', title: '发行商', path: '/makers', subtitle: '按发行商浏览' },
-  { id: 'vr', title: 'VR', path: '/genres/VR', subtitle: 'VR 作品专区' }
+const MISSAV_CATEGORY_GROUPS = [
+  { id: 'japanese', title: '日本 AV / 综合分类' },
+  { id: 'amateur', title: '素人' },
+  { id: 'uncensored', title: '无码影片' },
+  { id: 'asian', title: '亚洲 AV' }
+];
+
+const MISSAV_HOME_MEDIA_SECTION_IDS = [
+  'recommended',
+  'nakadashi',
+  'big-breasts',
+  'married-women',
+  'new-release',
+  'latest',
+  'chinese-subtitle',
+  'uncensored-leak',
+  'random',
+  'today-hot',
+  'weekly-hot',
+  'monthly-hot'
 ];
 
 function getManifest() {
@@ -133,11 +163,27 @@ function getManifest() {
       },
       {
         name: 'browserVisible',
-        title: '显示验证窗口',
+        title: '旧版显示窗口开关',
         type: 'boolean',
         defaultValue: false,
         required: false,
-        description: '默认关闭，避免列表页自动跳出真人验证界面。需要时点击页面里的手动验证卡片。'
+        description: '为兼容旧设置保留。自动请求始终隐藏；需要验证时请点击“手动完成验证”卡片。'
+      },
+      {
+        name: 'automaticBrowserFallback',
+        title: '自动静默浏览器兜底',
+        type: 'boolean',
+        defaultValue: true,
+        required: false,
+        description: '普通 HTTP 命中 Cloudflare 时静默尝试一次；关闭后只显示手动验证卡片。'
+      },
+      {
+        name: 'verificationCooldownMinutes',
+        title: '验证重试间隔分钟',
+        type: 'number',
+        defaultValue: 10,
+        required: false,
+        description: '静默验证失败后暂停自动重试，避免浏览时连续触发 Cloudflare。'
       },
       {
         name: 'requestTimeoutSeconds',
@@ -154,16 +200,26 @@ function getManifest() {
         defaultValue: 20,
         required: false,
         description: '短期缓存首页、分类、详情 HTML，减少重复触发 Cloudflare。'
+      },
+      {
+        name: 'categoryRestoreMinutes',
+        title: '分类浏览进度保留分钟',
+        type: 'number',
+        defaultValue: 60,
+        required: false,
+        description: '从影片详情返回分类时，恢复已经加载的分页项目，避免列表退回并卡在 12 项。'
       }
     ]
   };
 }
 
 async function getHome(ctx) {
+  ctx = normalizeContext(ctx);
   const html = await safeFetch(ctx, entryURL(ctx), baseURL(ctx) + '/');
   const hero = parseCards(sectionBlock(html, '推荐给你'), '推荐给你', ctx).slice(0, 10).map(toWideItem);
   const mediaSections = homeMediaSections(ctx, parseHomeSections(ctx, html));
-  const sections = [primaryCategoriesSection(ctx)].concat(mediaSections);
+  const artwork = categoryArtworkFromSections(ctx, mediaSections);
+  const sections = categoryGroupSections(ctx, artwork).concat(mediaSections);
 
   return {
     pageType: 'home',
@@ -183,7 +239,9 @@ function homeMediaSections(ctx, parsedSections) {
     seen[section.id] = true;
     sections.push(section);
   });
-  MISSAV_SECTIONS.forEach(function (section) {
+  MISSAV_SECTIONS.filter(function (section) {
+    return MISSAV_HOME_MEDIA_SECTION_IDS.indexOf(section.id) >= 0;
+  }).forEach(function (section) {
     if (seen[section.id]) return;
     seen[section.id] = true;
     sections.push(sectionShell(ctx, section));
@@ -191,26 +249,63 @@ function homeMediaSections(ctx, parsedSections) {
   return sections;
 }
 
-function primaryCategoriesSection(ctx) {
-  return {
-    id: 'missav-primary-categories',
-    title: '分类',
-    style: 'discover.annualCategories',
-    lazy: false,
-    items: MISSAV_PRIMARY_CATEGORIES.map(function (category) {
-      return categoryCard(ctx, category);
-    })
-  };
+function categoryGroupSections(ctx, artwork) {
+  const sections = [];
+  MISSAV_CATEGORY_GROUPS.forEach(function (group) {
+    const categories = MISSAV_SECTIONS.filter(function (category) {
+      return category.group === group.id;
+    });
+    for (let offset = 0; offset < categories.length; offset += 6) {
+      const part = Math.floor(offset / 6);
+      const groupSectionId = 'missav-categories-' + group.id + (part ? '-' + (part + 1) : '');
+      const groupCategories = categories.slice(offset, offset + 6);
+      const hasCompleteArtwork = groupCategories.every(function (category) {
+        return categoryPreviewItems(
+          artwork && artwork[category.id] && artwork[category.id].length
+            ? artwork[category.id]
+            : cachedCategoryArtwork(ctx, category.id),
+          category
+        ).length >= 3;
+      });
+      sections.push({
+        id: groupSectionId,
+        title: group.title + (part ? '（续 ' + part + '）' : ''),
+        style: 'discover.annualWidePreview',
+        lazy: !hasCompleteArtwork,
+        loadAction: !hasCompleteArtwork
+          ? { type: 'custom', id: groupSectionId, sectionId: groupSectionId, title: group.title }
+          : undefined,
+        items: hasCompleteArtwork
+          ? groupCategories.map(function (category) {
+              return categoryCard(ctx, category, artwork && artwork[category.id]);
+            })
+          : []
+      });
+    }
+  });
+  return sections;
 }
 
-function categoryCard(ctx, category) {
-  return {
+function categoryCard(ctx, category, livePreviewItems) {
+  const cachedPreviewItems = cachedCategoryArtwork(ctx, category.id);
+  const previewItems = categoryPreviewItems(
+    livePreviewItems && livePreviewItems.length
+      ? livePreviewItems
+      : cachedPreviewItems,
+    category
+  );
+  const cover = previewItems[0] && firstNonEmpty(
+    previewItems[0].backdrop,
+    previewItems[0].poster,
+    previewItems[0].thumbnailURL
+  );
+  const item = {
     id: 'category-' + category.id,
     title: category.title,
-    subtitle: category.subtitle || '',
+    subtitle: category.subtitle || '浏览' + category.title + '相关内容',
     type: 'category',
     aspectRatio: '16:9',
-    previewItems: [],
+    previewItems: previewItems,
     action: {
       type: 'category',
       id: category.id,
@@ -220,43 +315,273 @@ function categoryCard(ctx, category) {
       itemAspectRatio: '16:9'
     }
   };
+  if (cover) {
+    item.poster = cover;
+    item.backdrop = cover;
+    item.thumbnailURL = cover;
+    item.posterPath = cover;
+    item.backdropPath = cover;
+    item.image = cover;
+    item.imageURL = cover;
+    item.posterURL = cover;
+    item.backdropURL = cover;
+    item.cover = cover;
+    item.coverURL = cover;
+    item.imageFit = 'fill';
+    item.imageHeaders = imageHeaders(ctx, categoryURL(ctx, category.path));
+    item.posterHeaders = item.imageHeaders;
+    item.backdropHeaders = item.imageHeaders;
+  }
+  return item;
+}
+
+function categoryArtworkFromSections(ctx, sections) {
+  const artwork = {};
+  (sections || []).forEach(function (section) {
+    if (!section || !section.id || !section.items || !section.items.length) return;
+    const previews = categoryPreviewItems(section.items, findSection(section.id));
+    if (!previews.length) return;
+    artwork[section.id] = previews;
+    rememberCategoryArtwork(ctx, section.id, previews);
+  });
+  return artwork;
+}
+
+function categoryPreviewItems(items, category) {
+  const prefixes = category && Array.isArray(category.artworkCodePrefixes)
+    ? category.artworkCodePrefixes.map(function (value) {
+        return String(value || '').toLowerCase();
+      }).filter(Boolean)
+    : [];
+  return (items || []).filter(function (item) {
+    if (!item || !firstNonEmpty(item.backdrop, item.poster, item.thumbnailURL)) return false;
+    if (!prefixes.length && !(category && category.detailSlugPattern)) return true;
+    if (!categoryMatchesItem(item, category)) return false;
+    if (!prefixes.length) return true;
+    const target = stringValue(item.action && (item.action.url || item.action.itemId || item.action.id)).toLowerCase();
+    const title = stringValue(item.title).toLowerCase();
+    return prefixes.some(function (prefix) {
+      return target.indexOf('/' + prefix) >= 0 || title.indexOf(prefix) >= 0;
+    });
+  }).slice(0, 3).map(function (item, index) {
+    const image = firstNonEmpty(item.backdrop, item.poster, item.thumbnailURL);
+    return {
+      id: item.id,
+      title: item.title,
+      type: item.type || 'movie',
+      rank: index + 1,
+      poster: image,
+      backdrop: image,
+      thumbnailURL: image,
+      aspectRatio: '16:9',
+      action: item.action
+    };
+  });
+}
+
+function categoryMatchesItem(item, category) {
+  if (!category || !category.detailSlugPattern) return true;
+  const target = stringValue(item && item.action && (item.action.url || item.action.itemId || item.action.id));
+  const slug = categorySlug(pathOf(target)).toLowerCase();
+  try {
+    return new RegExp(category.detailSlugPattern, 'i').test(slug);
+  } catch (error) {
+    return true;
+  }
+}
+
+function filterCategoryItems(items, category) {
+  if (!category || !category.detailSlugPattern) return items || [];
+  return (items || []).filter(function (item) {
+    return categoryMatchesItem(item, category);
+  });
 }
 
 async function getHomeSection(ctx) {
+  ctx = normalizeContext(ctx);
   const sectionId = stringValue(ctx && (ctx.sectionId || ctx.id));
+  const categoryGroup = categoryGroupFromSectionId(sectionId);
+  if (categoryGroup) return loadCategoryGroupSection(ctx, categoryGroup);
   const section = findSection(sectionId) || MISSAV_SECTIONS[0];
+  if (section.personalizedHome) return personalizedRecommendationSection(ctx, section);
   const url = categoryURL(ctx, section.path);
   try {
     const html = await fetchText(ctx, url, entryURL(ctx));
+    const items = filterCategoryItems(
+      parseCards(mediaListBlock(html), section.title, ctx),
+      section
+    ).slice(0, 18);
+    rememberCategoryArtwork(ctx, section.id, items);
     return {
       id: section.id,
       title: section.title,
       style: section.style,
       lazy: false,
       moreAction: categoryAction(ctx, section),
-      items: parseCards(html, section.title, ctx).slice(0, 18)
+      items: items
     };
   } catch (error) {
     return verificationSection(ctx, section.id, section.title, section.style, url, error);
   }
 }
 
+function categoryGroupFromSectionId(sectionId) {
+  const value = stringValue(sectionId);
+  const match = /^missav-categories-([a-z]+)(?:-(\d+))?$/.exec(value);
+  if (!match) return null;
+  const group = MISSAV_CATEGORY_GROUPS.find(function (item) {
+    return item.id === match[1];
+  });
+  if (!group) return null;
+  const partNumber = Math.max(1, Number(match[2] || 1));
+  const categories = MISSAV_SECTIONS.filter(function (category) {
+    return category.group === group.id;
+  }).slice((partNumber - 1) * 6, partNumber * 6);
+  if (!categories.length) return null;
+  return {
+    id: value,
+    title: group.title + (partNumber > 1 ? '（续 ' + (partNumber - 1) + '）' : ''),
+    categories: categories
+  };
+}
+
+async function loadCategoryGroupSection(ctx, groupSection) {
+  const artwork = {};
+  const categories = groupSection.categories || [];
+  for (let offset = 0; offset < categories.length; offset += 2) {
+    const batch = categories.slice(offset, offset + 2);
+    const results = await Promise.all(batch.map(function (category) {
+      return loadCategoryPreviewItems(ctx, category);
+    }));
+    batch.forEach(function (category, index) {
+      artwork[category.id] = results[index];
+    });
+  }
+  return {
+    id: groupSection.id,
+    title: groupSection.title,
+    style: 'discover.annualWidePreview',
+    lazy: false,
+    items: categories.map(function (category) {
+      return categoryCard(ctx, category, artwork[category.id]);
+    })
+  };
+}
+
+async function loadCategoryPreviewItems(ctx, category) {
+  const cached = categoryPreviewItems(cachedCategoryArtwork(ctx, category.id), category);
+  if (cached.length >= 3) return cached;
+  try {
+    const url = categoryURL(ctx, category.path);
+    let html;
+    if (category.personalizedHome) {
+      html = await fetchText(ctx, entryURL(ctx), entryURL(ctx));
+    } else if (category.categoryIndex && isActressIndexURL(url)) {
+      html = await fetchActressIndexText(ctx, url, entryURL(ctx));
+    } else {
+      html = await fetchText(ctx, url, entryURL(ctx));
+    }
+    let items;
+    if (category.personalizedHome) {
+      items = parseCards(sectionBlock(html, category.title), category.title, ctx);
+      if (!items.length) items = parseCards(mediaListBlock(html), category.title, ctx);
+    } else if (category.categoryIndex) {
+      items = parseCategoryCards(ctx, html, category.title);
+      if (!items.length) items = parseCards(mediaListBlock(html), category.title, ctx);
+    } else {
+      items = filterCategoryItems(
+        parseCards(mediaListBlock(html), category.title, ctx),
+        category
+      );
+    }
+    const previews = categoryPreviewItems(items, category);
+    if (previews.length) rememberCategoryArtwork(ctx, category.id, previews);
+    return previews;
+  } catch (error) {
+    return cached;
+  }
+}
+
+async function personalizedRecommendationSection(ctx, section) {
+  let items = [];
+  const homeURL = entryURL(ctx);
+  const browserText = await browserHTML(ctx, homeURL, homeURL);
+  if (browserText) {
+    items = parseCards(sectionBlock(browserText, section.title), section.title, ctx).slice(0, 18);
+  }
+  if (!items.length) {
+    try {
+      const fallbackHTML = await fetchText(ctx, randomPageURL(ctx, 1), homeURL);
+      items = parseCards(fallbackHTML, section.title, ctx).slice(0, 18);
+    } catch (error) {
+      return verificationSection(ctx, section.id, section.title, section.style, homeURL, error);
+    }
+  }
+  rememberCategoryArtwork(ctx, section.id, items);
+  return {
+    id: section.id,
+    title: section.title,
+    style: section.style,
+    lazy: false,
+    moreAction: categoryAction(ctx, section),
+    items: items
+  };
+}
+
 async function getCategory(ctx) {
-  const page = positiveInt(contextValue(ctx, 'page'), 1);
+  ctx = normalizeContext(ctx);
+  const requestedPage = pageFromContext(ctx, 1);
   const pageId = normalizePageId(ctx, ctx && (ctx.pageId || ctx.id));
+  const verificationURL = verificationUrlFromPageId(pageId);
+  if (verificationURL) return runVerificationCategory(ctx, pageId, verificationURL);
   const section = findSection(pageId);
   const primary = findPrimaryCategory(pageId);
   const path = section ? section.path : primary ? primary.path : pageId;
-  const url = pagedURL(categoryURL(ctx, path), page);
+  const page = categoryFetchPage(ctx, pageId, requestedPage);
+  const url = section && section.randomCategory
+    ? randomPageURL(ctx, page)
+    : pagedURL(categoryURL(ctx, path), page);
   let html = '';
   try {
-    html = await fetchText(ctx, url, entryURL(ctx));
+    html = isActressWorksURL(url)
+      ? await fetchActressCategoryText(ctx, url, entryURL(ctx))
+      : isActressIndexURL(url)
+        ? await fetchActressIndexText(ctx, url, entryURL(ctx))
+        : await fetchText(ctx, url, entryURL(ctx));
   } catch (error) {
     return verificationCategory(ctx, pageId, section ? section.title : primary ? primary.title : '需要验证', url, error, page);
   }
   const title = section ? section.title : primary ? primary.title : pageTitle(html) || 'MissAV';
-  const items = parseCards(html, title, ctx);
-  const categoryItems = items.length ? [] : parseCategoryCards(ctx, html, title);
+  const categoryIndex = !!(section && section.categoryIndex);
+  const categoryItems = categoryIndex ? parseCategoryCards(ctx, html, title) : [];
+  const items = categoryItems.length
+    ? []
+    : filterCategoryItems(parseCards(mediaListBlock(html), title, ctx), section);
+  const fallbackCategoryItems = items.length || categoryItems.length ? [] : parseCategoryCards(ctx, html, title);
+  const listItems = items.length
+    ? items
+    : categoryItems.length
+      ? categoryItems
+      : fallbackCategoryItems;
+  if (section && items.length) rememberCategoryArtwork(ctx, section.id, items);
+  const pagination = section && section.randomCategory
+    ? { hasMore: true, totalPages: 99 }
+    : section && section.id === 'actress-ranking'
+      ? { hasMore: false, totalPages: 1 }
+    : paginationInfo(html, page, listItems.length);
+  if (items.length && requestedPage === 1 && section && section.eagerPagination) {
+    await prefetchNextCategoryPage(ctx, pageId, section, page, pagination);
+  }
+  const restored = listItems.length
+    ? rememberCategoryPage(ctx, pageId, page, listItems, pagination)
+    : null;
+  const responseItems = restored && restored.items.length
+    ? restored.items
+    : items.length
+      ? items
+      : listItems;
+  const responsePage = restored ? restored.page : page;
+  const responseHasMore = restored ? restored.hasMore : items.length ? pagination.hasMore : false;
 
   return {
     pageType: 'category',
@@ -264,13 +589,19 @@ async function getCategory(ctx) {
     title: title,
     style: items.length ? 'media.posterGrid' : 'discover.annualCategories',
     itemAspectRatio: '16:9',
-    items: items.length ? items : categoryItems,
-    page: page,
-    hasMore: items.length ? hasNextPage(html, page) : false
+    items: responseItems,
+    page: responsePage,
+    currentPage: responsePage,
+    pageIndex: responsePage,
+    nextPage: responseHasMore ? responsePage + 1 : undefined,
+    totalPages: restored && restored.totalPages ? restored.totalPages : pagination.totalPages,
+    pagecount: restored && restored.totalPages ? restored.totalPages : pagination.totalPages,
+    hasMore: responseHasMore
   };
 }
 
 async function getDetail(ctx) {
+  ctx = normalizeContext(ctx);
   const detailURL = detailUrlFromContext(ctx);
   if (!detailURL) throw new Error('MissAV 详情参数无效');
 
@@ -311,9 +642,21 @@ async function getDetail(ctx) {
     firstMatch(html, /(\d{1,2}:\d{2}:\d{2})/i)
   );
   const releaseDate = firstMatch(html, /(\d{4}-\d{2}-\d{2})/);
-  const detailPlayableURL = absoluteURL(ctx, extractPlayableURL(html));
-  const resourceGroups = playbackGroups(detailURL, title, detailPlayableURL, ctx);
-  const defaultVersion = resourceGroups[0] && resourceGroups[0].versions && resourceGroups[0].versions[0];
+  let detailPlayableURL = absoluteURL(ctx, extractPlayableURL(html));
+  if (!detailPlayableURL) detailPlayableURL = await extractPlayableFromLinkedPlayers(ctx, html, detailURL);
+  let resourceGroups = await playbackGroups(detailURL, title, detailPlayableURL, ctx, html);
+  if (resourceVersionCount(resourceGroups) <= 1) {
+    const browserPlayableURL = await extractFromBrowser(detailURL, detailURL);
+    if (browserPlayableURL && browserPlayableURL !== detailPlayableURL) {
+      const browserGroups = await playbackGroups(detailURL, title, browserPlayableURL, ctx, html);
+      if (resourceVersionCount(browserGroups) > resourceVersionCount(resourceGroups)) {
+        detailPlayableURL = browserPlayableURL;
+        resourceGroups = browserGroups;
+      }
+    }
+  }
+  const versions = resourceGroups[0] && resourceGroups[0].versions || [];
+  const defaultVersion = versions[0];
 
   return {
     id: makeItemId(detailURL, title, poster),
@@ -335,19 +678,19 @@ async function getDetail(ctx) {
     remarks: durationText || code,
     resourceGroups: resourceGroups,
     resourceSummary: {
-      versionCount: defaultVersion ? 1 : 0,
+      versionCount: versions.length,
       episodeCount: 0,
       defaultVersionId: defaultVersion ? defaultVersion.id : ''
     },
-    mediaSources: detailPlayableURL ? [
+    mediaSources: defaultVersion && defaultVersion.url ? [
       {
-        id: encodePayload({ url: detailURL, title: title, playUrl: detailPlayableURL }),
-        name: 'MissAV HLS',
-        displayName: 'MissAV HLS',
+        id: defaultVersion.id,
+        name: defaultVersion.name,
+        displayName: defaultVersion.name,
         protocol: 'hls',
         container: 'm3u8',
-        url: detailPlayableURL,
-        path: detailPlayableURL,
+        url: defaultVersion.url,
+        path: defaultVersion.url,
         headers: playbackHeaders(ctx, detailURL),
         header: playbackHeaders(ctx, detailURL),
         Header: playbackHeaders(ctx, detailURL),
@@ -372,32 +715,74 @@ async function getDetail(ctx) {
 }
 
 async function getResourceVersions(ctx) {
+  ctx = normalizeContext(ctx);
   const detailURL = detailUrlFromContext(ctx);
   const title = stringValue(ctx && (ctx.title || ctx.name)) || titleFromUrl(detailURL);
   const direct = playUrlFromContext(ctx);
-  if (direct) return playbackGroups(detailURL, title, direct, ctx);
+  if (direct) {
+    let directGroups = await playbackGroups(detailURL, title, direct, ctx);
+    if (resourceVersionCount(directGroups) <= 1 && detailURL) {
+      const browserPlayableURL = await extractFromBrowser(detailURL, detailURL);
+      if (browserPlayableURL && browserPlayableURL !== direct) {
+        const browserGroups = await playbackGroups(detailURL, title, browserPlayableURL, ctx);
+        if (resourceVersionCount(browserGroups) > resourceVersionCount(directGroups)) directGroups = browserGroups;
+      }
+    }
+    return directGroups;
+  }
   try {
     const html = await fetchText(ctx, detailURL, entryURL(ctx));
-    return playbackGroups(detailURL, title, extractPlayableURL(html), ctx);
+    let playUrl = extractPlayableURL(html);
+    if (!playUrl) playUrl = await extractPlayableFromLinkedPlayers(ctx, html, detailURL);
+    let groups = await playbackGroups(detailURL, title, playUrl, ctx, html);
+    if (resourceVersionCount(groups) <= 1) {
+      const browserPlayableURL = await extractFromBrowser(detailURL, detailURL);
+      if (browserPlayableURL && browserPlayableURL !== playUrl) {
+        const browserGroups = await playbackGroups(detailURL, title, browserPlayableURL, ctx, html);
+        if (resourceVersionCount(browserGroups) > resourceVersionCount(groups)) groups = browserGroups;
+      }
+    }
+    return groups;
   } catch (error) {
-    return playbackGroups(detailURL, title, '', ctx);
+    return [];
   }
 }
 
-async function resolvePlayback(ctx) {
+async function resolvePlaybackWithinBudget(ctx) {
+  ctx = normalizeContext(ctx);
+  const requestedQuality = qualityFromContext(ctx);
   const direct = firstNonEmpty(playUrlFromContext(ctx), ctx && ctx.url, ctx && ctx.playUrl, ctx && ctx.videoUrl);
-  if (isPlayableURL(direct) && !isDetailPageURL(direct)) {
+  const stableDetailURL = detailUrlFromContext(ctx);
+  if (!isDetailPageURL(stableDetailURL) && !requestedQuality && isPlayableURL(direct) && !isDetailPageURL(direct)) {
     return playbackResult(ctx, direct, ctx && ctx.referer);
   }
 
   const detailURL = detailUrlFromContext(ctx);
   if (!detailURL) throw new Error('MissAV 播放参数无效');
-  const html = await fetchText(ctx, detailURL, entryURL(ctx));
-  const url = firstNonEmpty(
-    extractPlayableURL(html),
-    await extractPlayableFromLinkedPlayers(ctx, html, detailURL),
-    await extractFromBrowser(detailURL, detailURL)
-  );
+  let html = '';
+  try {
+    html = await fetchText(ctx, detailURL, entryURL(ctx));
+  } catch (error) {
+    // Playback has a separate, narrowly-scoped hidden browser media fallback.
+  }
+  let masterURL = extractPlayableURL(html);
+  if (!masterURL) masterURL = await extractPlayableFromLinkedPlayers(ctx, html, detailURL);
+  if (!masterURL) masterURL = await extractFromBrowser(detailURL, detailURL, ctx);
+  let url = masterURL;
+  if (masterURL) {
+    let qualities = await discoverAvailableQualities(ctx, masterURL, detailURL, html);
+    const knownQuality = qualities.some(function (quality) { return quality.height > 0; });
+    const missingRequested = requestedQuality && !qualities.some(function (quality) { return String(quality.height) === String(requestedQuality); });
+    if ((!knownQuality || missingRequested) && ctx.__playbackBudget.browserCalls === 0) {
+      const browserMasterURL = await extractFromBrowser(detailURL, detailURL, ctx);
+      if (browserMasterURL && browserMasterURL !== masterURL) {
+        const browserQualities = await discoverAvailableQualities(ctx, browserMasterURL, detailURL, html);
+        if (browserQualities.length > qualities.length) qualities = browserQualities;
+      }
+    }
+    const selected = selectQuality(qualities, requestedQuality);
+    if (selected && selected.url) url = selected.url;
+  }
   if (!url) {
     throw new Error('未能解析到 MissAV 播放地址。站点可能启用了 Cloudflare 或更换了播放器脚本，请尝试更新入口路径或在 App 侧启用浏览器请求。');
   }
@@ -450,9 +835,10 @@ async function play(flagOrInput, id) {
 }
 
 async function search(ctx) {
+  ctx = normalizeContext(ctx);
   const query = stringValue(ctx && (ctx.query || ctx.keyword || ctx.text));
   if (!query) return { pageType: 'search', title: '搜索结果', items: [] };
-  const page = positiveInt(contextValue(ctx, 'page'), 1);
+  const page = pageFromContext(ctx, 1);
   const url = pagedURL(categoryURL(ctx, '/search/' + encodeURIComponent(query.replace(/\\/g, ''))), page);
   let html = '';
   try {
@@ -467,12 +853,18 @@ async function search(ctx) {
     };
   }
   const items = parseCards(html, query, ctx);
+  const pagination = paginationInfo(html, page, items.length);
   return {
     pageType: 'search',
     title: '搜索结果',
     items: items,
     page: page,
-    hasMore: hasNextPage(html, page)
+    currentPage: page,
+    pageIndex: page,
+    nextPage: pagination.hasMore ? page + 1 : undefined,
+    totalPages: pagination.totalPages,
+    pagecount: pagination.totalPages,
+    hasMore: pagination.hasMore
   };
 }
 
@@ -492,11 +884,20 @@ async function matchResources(ctx) {
 }
 
 async function onAction(ctx) {
-  const name = stringValue(ctx && (ctx.name || ctx.action || ctx.id));
-  const payload = (ctx && ctx.payload) || ctx || {};
+  ctx = normalizeContext(ctx);
+  const nestedAction = ctx && ctx.action && typeof ctx.action === 'object' ? ctx.action : {};
+  const name = stringValue(firstNonEmpty(
+    ctx && ctx.name,
+    nestedAction.name,
+    ctx && ctx.actionName,
+    nestedAction.id,
+    ctx && ctx.id
+  ));
+  const payload = nestedAction.payload || (ctx && ctx.payload) || nestedAction || ctx || {};
   if (name !== 'verifyCloudflare') return { handled: false };
   const url = stringValue(payload.url || ctx.url) || entryURL(ctx);
   const html = await browserHTML(ctx, url, url, true);
+  if (isUsableHTML(html)) setCachedText(ctx, url, html);
   return {
     handled: true,
     ok: isUsableHTML(html),
@@ -544,6 +945,47 @@ function baseURL(ctx) {
   ) || MISSAV_DEFAULT_BASE).replace(/\/+$/, '');
 }
 
+function normalizeContext(ctx) {
+  if (ctx === undefined || ctx === null) return {};
+  if (typeof ctx === 'string') {
+    const text = ctx.trim();
+    if (!text) return {};
+    if (text[0] === '{' && text[text.length - 1] === '}') {
+      try {
+        const parsed = JSON.parse(text);
+        return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+      } catch (error) {
+        return { query: text };
+      }
+    }
+    return { query: text };
+  }
+  return typeof ctx === 'object' ? ctx : {};
+}
+
+function pageFromContext(ctx, fallback) {
+  const input = normalizeContext(ctx);
+  const pagination = input.pagination && typeof input.pagination === 'object' ? input.pagination : {};
+  const pageInfo = input.pageInfo && typeof input.pageInfo === 'object' ? input.pageInfo : {};
+  return positiveInt(firstNonEmpty(
+    contextValue(input, 'page'),
+    contextValue(input, 'pg'),
+    contextValue(input, 'currentPage'),
+    contextValue(input, 'pageNumber'),
+    contextValue(input, 'pageIndex'),
+    pagination.page,
+    pagination.pg,
+    pagination.currentPage,
+    pagination.pageNumber,
+    pagination.pageIndex,
+    pageInfo.page,
+    pageInfo.pg,
+    pageInfo.currentPage,
+    pageInfo.pageNumber,
+    pageInfo.pageIndex
+  ), fallback);
+}
+
 function entryPath(ctx) {
   let value = stringValue(
     contextValue(ctx, 'entryPath') ||
@@ -587,6 +1029,95 @@ function pagedURL(url, page) {
   if (page <= 1) return url;
   if (/[?&]page=\d+/i.test(url)) return url.replace(/([?&]page=)\d+/i, '$1' + page);
   return url + (url.indexOf('?') >= 0 ? '&' : '?') + 'page=' + page;
+}
+
+function isActressWorksURL(url) {
+  const path = pathOf(url).split('?')[0].replace(/\/+$/, '');
+  return /\/(?:dm\d+\/)?cn\/actresses\/[^/]+$/i.test(path) &&
+    !/\/actresses\/ranking$/i.test(path);
+}
+
+function isActressIndexURL(url) {
+  const path = pathOf(url).split('?')[0].replace(/\/+$/, '');
+  return /\/(?:dm\d+\/)?cn\/actresses(?:\/ranking)?$/i.test(path);
+}
+
+async function fetchActressCategoryText(ctx, url, referer) {
+  const cached = getCachedText(ctx, url);
+  if (cached) return cached;
+
+  const fastContext = Object.assign({}, ctx || {}, {
+    requestTimeoutSeconds: Math.min(numberParam(ctx, 'requestTimeoutSeconds', 45), 12),
+    suppressBrowserFailureCooldown: true
+  });
+
+  let lastError = null;
+  try {
+    const options = requestOptions(fastContext, referer || url);
+    options.useBrowserFallback = false;
+    options.browserFallback = false;
+    options.allowBrowserFallback = false;
+    const response = await httpGet(url, options);
+    const text = responseText(response);
+    if (isUsableHTML(text, response && response.status, response && response.headers)) {
+      setCachedText(ctx, url, text);
+      return text;
+    }
+    throw new Error('HTTP ' + (response && response.status ? response.status : 'empty'));
+  } catch (error) {
+    lastError = error;
+  }
+
+  // Actress work pages are challenged more often than ordinary categories.
+  // Reuse the verified browser session once with a short timeout instead of
+  // immediately appending another verification card to the existing 12 items.
+  const browserText = await browserHTML(fastContext, url, referer || url);
+  if (isVerifiedTargetHTML(fastContext, url, browserText)) {
+    setCachedText(ctx, url, browserText);
+    return browserText;
+  }
+
+  throw new Error(
+    '女优作品页读取失败。已短暂尝试复用刚才的验证状态，请点击一次真人验证后重试。' +
+    (lastError && lastError.message ? ' 原因：' + lastError.message : '')
+  );
+}
+
+async function fetchActressIndexText(ctx, url, referer) {
+  const cached = getCachedText(ctx, url);
+  if (cached && isVerifiedTargetHTML(ctx, url, cached)) return cached;
+
+  const fastContext = Object.assign({}, ctx || {}, {
+    requestTimeoutSeconds: Math.min(numberParam(ctx, 'requestTimeoutSeconds', 45), 12),
+    suppressBrowserFailureCooldown: true
+  });
+  let lastError = null;
+  try {
+    const options = requestOptions(fastContext, referer || url);
+    options.useBrowserFallback = false;
+    options.browserFallback = false;
+    options.allowBrowserFallback = false;
+    const response = await httpGet(url, options);
+    const text = responseText(response);
+    if (isVerifiedTargetHTML(fastContext, url, text)) {
+      setCachedText(ctx, url, text);
+      return text;
+    }
+    throw new Error('HTTP ' + (response && response.status ? response.status : 'empty'));
+  } catch (error) {
+    lastError = error;
+  }
+
+  const browserText = await browserHTML(fastContext, url, referer || url);
+  if (isVerifiedTargetHTML(fastContext, url, browserText)) {
+    setCachedText(ctx, url, browserText);
+    return browserText;
+  }
+
+  throw new Error(
+    '女优目录读取失败。已短暂尝试复用浏览器验证状态，请手动完成一次真人验证。' +
+    (lastError && lastError.message ? ' 原因：' + lastError.message : '')
+  );
 }
 
 async function fetchText(ctx, url, referer) {
@@ -637,16 +1168,17 @@ async function safeFetch(ctx, url, referer) {
 }
 
 function requestOptions(ctx, referer) {
-  const timeout = numberParam(ctx, 'requestTimeoutSeconds', 45);
+  const timeout = remainingPlaybackSeconds(ctx, ctx && ctx.__playbackBudget ? 6 : numberParam(ctx, 'requestTimeoutSeconds', 45));
+  const browserFallback = !(ctx && ctx.__playbackBudget) && boolParam(ctx, 'enableBrowserFallback', true);
   return {
     headers: requestHeaders(ctx, referer),
     timeout: timeout,
     timeoutSeconds: timeout,
     useBrowserCookie: true,
     attachBrowserCookie: true,
-    useBrowserFallback: boolParam(ctx, 'enableBrowserFallback', true),
-    browserFallback: boolParam(ctx, 'enableBrowserFallback', true),
-    allowBrowserFallback: boolParam(ctx, 'enableBrowserFallback', true)
+    useBrowserFallback: browserFallback,
+    browserFallback: browserFallback,
+    allowBrowserFallback: browserFallback
   };
 }
 
@@ -654,8 +1186,18 @@ function httpGet(url, options) {
   if (typeof Widget !== 'undefined' && Widget.http && typeof Widget.http.get === 'function') {
     return Widget.http.get(url, options || {});
   }
+  if (typeof Widget !== 'undefined' && Widget.http && typeof Widget.http.request === 'function') {
+    const widgetOptions = options || {};
+    if (!widgetOptions.method) widgetOptions.method = 'GET';
+    return Widget.http.request(url, widgetOptions);
+  }
   if (typeof $http !== 'undefined' && typeof $http.get === 'function') {
     return $http.get(url, options || {});
+  }
+  if (typeof $http !== 'undefined' && typeof $http.request === 'function') {
+    const legacyOptions = options || {};
+    if (!legacyOptions.method) legacyOptions.method = 'GET';
+    return $http.request(url, legacyOptions);
   }
   throw new Error('当前运行环境没有可用 HTTP 客户端。');
 }
@@ -688,43 +1230,84 @@ function playbackHeaders(ctx, referer) {
 function responseText(response) {
   if (typeof response === 'string') return response;
   if (!response) return '';
+  if (typeof response.text === 'string') return response.text;
   if (typeof response.data === 'string') return response.data;
   if (typeof response.body === 'string') return response.body;
+  if (response.data && typeof response.data.html === 'string') return response.data.html;
+  if (response.body && typeof response.body.html === 'string') return response.body.html;
+  if (typeof response.html === 'string') return response.html;
   return String(response.data || response.body || '');
 }
 
 async function browserHTML(ctx, url, referer, forceVisible) {
   if (!boolParam(ctx, 'enableBrowserFallback', true)) return '';
+  if (forceVisible !== true && !boolParam(ctx, 'automaticBrowserFallback', true)) return '';
+  if (forceVisible !== true && browserRetryBlocked(ctx, url)) return '';
   if (typeof Widget === 'undefined' || !Widget.browser || typeof Widget.browser.fetch !== 'function') return '';
   try {
-    const timeout = numberParam(ctx, 'requestTimeoutSeconds', 45);
+    const visible = forceVisible === true;
+    const configuredTimeout = numberParam(ctx, 'requestTimeoutSeconds', 45);
+    const timeout = playbackBrowserSeconds(ctx, visible ? Math.min(configuredTimeout, 20) : ctx && ctx.__playbackBudget ? Math.min(configuredTimeout, 12) : configuredTimeout, 1);
+    if (!timeout) return '';
     const result = await Widget.browser.fetch(url, {
-      visible: forceVisible === true ? true : boolParam(ctx, 'browserVisible', false),
+      visible: visible,
       timeout: timeout,
       timeoutSeconds: timeout,
-      waitAfterLoad: 4,
-      waitForAny: true,
-      waitForMediaSource: true,
+      waitAfterLoad: visible ? 1.5 : 3,
       headers: {
         'User-Agent': MISSAV_UA,
         Referer: referer || url
       }
     });
-    return responseText(result.html ? { data: result.html } : result);
+    const html = responseText(result.html ? { data: result.html } : result);
+    if (isUsableHTML(html)) {
+      clearBrowserFailure(url);
+      return html;
+    }
+    rememberBrowserFailure(ctx, url);
+    return '';
   } catch (error) {
+    rememberBrowserFailure(ctx, url);
     return '';
   }
 }
 
-async function extractFromBrowser(url, referer) {
+function browserFailureKey(url) {
+  const scope = isActressWorksURL(url) || isActressIndexURL(url)
+    ? pathOf(url).split('?')[0].replace(/\/+$/, '')
+    : '';
+  return 'missav:browser-failure:' + originOf(url) + (scope ? ':' + scope : '');
+}
+
+function browserRetryBlocked(ctx, url) {
+  const value = cacheGet(browserFailureKey(url));
+  return !!(value && Number(value.retryAfter) > Date.now());
+}
+
+function rememberBrowserFailure(ctx, url) {
+  if (boolParam(ctx, 'suppressBrowserFailureCooldown', false)) return;
+  const minutes = Math.max(0, numberParam(ctx, 'verificationCooldownMinutes', 10));
+  if (!minutes) return;
+  cacheSet(browserFailureKey(url), { retryAfter: Date.now() + minutes * 60 * 1000 });
+}
+
+function clearBrowserFailure(url) {
+  cacheSet(browserFailureKey(url), { retryAfter: 0 });
+}
+
+async function extractFromBrowser(url, referer, ctx) {
+  if (ctx && ctx.__playbackBudget && ctx.__playbackBudget.browserCalls >= 1) return '';
   if (typeof Widget === 'undefined' || !Widget.browser || typeof Widget.browser.fetch !== 'function') return '';
   try {
     const result = await Widget.browser.fetch(url, {
       visible: false,
-      timeout: 70,
+      timeout: playbackBrowserSeconds(ctx, 12, 1),
+      timeoutSeconds: remainingPlaybackSeconds(ctx, 12),
       waitAfterLoad: 3,
       waitForMediaSource: true,
       waitForAny: true,
+      captureRequests: true,
+      captureMedia: true,
       headers: {
         'User-Agent': MISSAV_UA,
         Referer: referer || url
@@ -783,8 +1366,8 @@ function candidatePathVariants(ctx, path) {
 
 function isKnownCategoryPath(path) {
   const clean = String(path || '').split(/[?#]/)[0].replace(/^\/(?:dm\d+\/)?cn/i, '') || '/';
-  return MISSAV_SECTIONS.concat(MISSAV_PRIMARY_CATEGORIES).some(function (item) {
-    return clean === item.path || clean === item.path.split('?')[0];
+  return MISSAV_SECTIONS.some(function (item) {
+    return categorySlug(clean) === categorySlug(item.path);
   });
 }
 
@@ -801,10 +1384,160 @@ function cacheKey(url) {
   return 'missav:html:' + String(url || '');
 }
 
+function categoryArtworkKey(ctx, pageId) {
+  return 'missav:category-artwork:v4:' + baseURL(ctx) + ':' + String(pageId || '');
+}
+
+function rememberCategoryArtwork(ctx, pageId, items) {
+  const previews = categoryPreviewItems(items, findSection(pageId));
+  if (!previews.length) return;
+  const key = categoryArtworkKey(ctx, pageId);
+  const value = {
+    items: previews,
+    expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000
+  };
+  memoryCache()[key] = value;
+  cacheSet(key, value);
+}
+
+function cachedCategoryArtwork(ctx, pageId) {
+  const key = categoryArtworkKey(ctx, pageId);
+  const now = Date.now();
+  let value = memoryCache()[key] || cacheGet(key);
+  if (typeof value === 'string') {
+    try {
+      value = JSON.parse(value);
+    } catch (error) {
+      value = null;
+    }
+  }
+  if (!value || value.expiresAt <= now || !Array.isArray(value.items)) return [];
+  memoryCache()[key] = value;
+  return value.items;
+}
+
+function categoryStateKey(ctx, pageId) {
+  return 'missav:category-state:v6:' + baseURL(ctx) + ':' + String(pageId || '');
+}
+
 function memoryCache() {
   if (typeof globalThis === 'undefined') return {};
   if (!globalThis.__MISSAV_HTML_CACHE__) globalThis.__MISSAV_HTML_CACHE__ = {};
   return globalThis.__MISSAV_HTML_CACHE__;
+}
+
+function categoryStateFromCache(ctx, pageId) {
+  const key = categoryStateKey(ctx, pageId);
+  const now = Date.now();
+  let state = memoryCache()[key] || cacheGet(key);
+  if (typeof state === 'string') {
+    try {
+      state = JSON.parse(state);
+    } catch (error) {
+      state = null;
+    }
+  }
+  if (!state || state.expiresAt <= now || !state.pages) return null;
+  memoryCache()[key] = state;
+  return state;
+}
+
+function randomPageURL(ctx, page) {
+  const bucket = ((Math.max(1, Number(page) || 1) - 1) % 99) + 2;
+  return baseURL(ctx) + '/random/' + bucket;
+}
+
+async function prefetchNextCategoryPage(ctx, pageId, section, page, pagination) {
+  if (!pagination || !pagination.hasMore) return;
+  const nextPage = page + 1;
+  const state = categoryStateFromCache(ctx, pageId);
+  if (state && state.pages && state.pages[String(nextPage)]) return;
+  try {
+    const url = pagedURL(categoryURL(ctx, section.path), nextPage);
+    const html = await fetchText(ctx, url, entryURL(ctx));
+    const items = parseCards(html, section.title, ctx);
+    if (!items.length) return;
+    rememberCategoryPage(ctx, pageId, nextPage, items, paginationInfo(html, nextPage, items.length));
+  } catch (error) {
+    // Page 1 remains usable; ordinary scrolling can retry the next page later.
+  }
+}
+
+function contiguousCategoryPage(state) {
+  if (!state || !state.pages || !state.pages['1']) return 0;
+  let page = 1;
+  while (state.pages[String(page + 1)]) page += 1;
+  return page;
+}
+
+function categoryFetchPage(ctx, pageId, requestedPage) {
+  if (requestedPage <= 1) return 1;
+  const state = categoryStateFromCache(ctx, pageId);
+  if (!state || !state.pages[String(requestedPage)]) return requestedPage;
+  const lastLoadedPage = contiguousCategoryPage(state);
+  return lastLoadedPage >= requestedPage ? lastLoadedPage + 1 : requestedPage;
+}
+
+function rememberCategoryPage(ctx, pageId, page, items, pagination) {
+  const key = categoryStateKey(ctx, pageId);
+  const ttl = numberParam(ctx, 'categoryRestoreMinutes', 60) * 60 * 1000;
+  const existing = categoryStateFromCache(ctx, pageId);
+  const state = existing || { pages: {} };
+  state.pages[String(page)] = (items || []).slice(0, 120);
+  state.hasMoreByPage = state.hasMoreByPage || {};
+  state.hasMoreByPage[String(page)] = !!(pagination && pagination.hasMore);
+  state.totalPages = Math.max(Number(state.totalPages) || 0, Number(pagination && pagination.totalPages) || 0);
+  state.expiresAt = Date.now() + ttl;
+
+  const pageNumbers = Object.keys(state.pages).map(Number).filter(function (value) {
+    return Number.isFinite(value) && value > 0;
+  }).sort(function (a, b) { return a - b; });
+  while (pageNumbers.length > 20) {
+    const removed = pageNumbers.shift();
+    delete state.pages[String(removed)];
+    delete state.hasMoreByPage[String(removed)];
+  }
+  memoryCache()[key] = state;
+  cacheSet(key, state);
+
+  if (page !== 1) {
+    return {
+      items: items,
+      page: page,
+      hasMore: !!(pagination && pagination.hasMore),
+      totalPages: Number(pagination && pagination.totalPages) || state.totalPages
+    };
+  }
+
+  const lastContiguousPage = contiguousCategoryPage(state);
+  if (lastContiguousPage === 1) {
+    return {
+      items: items,
+      page: 1,
+      hasMore: !!(pagination && pagination.hasMore),
+      totalPages: Number(pagination && pagination.totalPages) || state.totalPages
+    };
+  }
+
+  const merged = [];
+  const seen = {};
+  for (let current = 1; current <= lastContiguousPage; current += 1) {
+    (state.pages[String(current)] || []).forEach(function (item) {
+      const identity = stringValue(item && (item.id || item.url || item.title));
+      if (identity && seen[identity]) return;
+      if (identity) seen[identity] = true;
+      merged.push(item);
+    });
+  }
+  const latestHasMore = state.hasMoreByPage[String(lastContiguousPage)];
+  return {
+    items: merged.slice(0, 240),
+    page: lastContiguousPage,
+    hasMore: latestHasMore !== undefined
+      ? latestHasMore
+      : state.totalPages > lastContiguousPage,
+    totalPages: state.totalPages
+  };
 }
 
 function getCachedText(ctx, url) {
@@ -821,7 +1554,9 @@ function getCachedText(ctx, url) {
 
 function setCachedText(ctx, url, text) {
   if (!isUsableHTML(text)) return;
-  const ttl = numberParam(ctx, 'cacheMinutes', 20) * 60 * 1000;
+  const configuredMinutes = numberParam(ctx, 'cacheMinutes', 20);
+  const minimumMinutes = isActressIndexURL(url) ? 60 : isActressWorksURL(url) ? 30 : 0;
+  const ttl = Math.max(configuredMinutes, minimumMinutes) * 60 * 1000;
   if (ttl <= 0) return;
   const value = { text: text, expiresAt: Date.now() + ttl };
   const key = cacheKey(url);
@@ -870,22 +1605,42 @@ function numberParam(ctx, key, fallback) {
 
 function playableFromBrowserResult(result) {
   if (!result) return '';
+  const candidates = [];
   const keys = ['url', 'mediaURL', 'mediaUrl', 'videoURL', 'videoUrl', 'playURL', 'playUrl', 'src'];
   for (let index = 0; index < keys.length; index += 1) {
     const value = result[keys[index]];
-    if (isPlayableURL(value)) return value;
+    if (isPlayableURL(value)) candidates.push(value);
   }
-  const arrays = [result.mediaSources, result.mediaRequests, result.requests, result.responses, result.urls];
+  const arrays = [
+    result.mediaSources,
+    result.mediaRequests,
+    result.capturedRequests,
+    result.requests,
+    result.responses,
+    result.urls
+  ];
   for (let a = 0; a < arrays.length; a += 1) {
     const array = arrays[a];
     if (!Array.isArray(array)) continue;
     for (let i = 0; i < array.length; i += 1) {
       const item = array[i];
       const value = typeof item === 'string' ? item : firstNonEmpty(item && item.url, item && item.src, item && item.responseURL);
-      if (isPlayableURL(value)) return value;
+      if (isPlayableURL(value)) candidates.push(value);
     }
   }
-  return '';
+  return unique(candidates).sort(function (left, right) {
+    return playableCandidateScore(right) - playableCandidateScore(left);
+  })[0] || '';
+}
+
+function playableCandidateScore(url) {
+  const value = String(url || '');
+  let score = 0;
+  if (/\.m3u8(?:[?#]|$)/i.test(value)) score += 20;
+  if (/(?:master|playlist|index)\.m3u8(?:[?#]|$)/i.test(value)) score += 40;
+  if (/\/\d{3,4}p(?:\/|[?#]|$)/i.test(value)) score -= 30;
+  if (/\.(?:ts|m2ts)(?:[?#]|$)/i.test(value)) score -= 100;
+  return score;
 }
 
 function parseHomeSections(ctx, html) {
@@ -899,7 +1654,7 @@ function parseHomeSections(ctx, html) {
     const predefined = findSection(title);
     sections.push({
       id: predefined ? predefined.id : 'missav-home-' + index,
-      title: predefined ? predefined.title : title,
+      title: title,
       style: predefined ? predefined.style : sectionStyle(title),
       moreAction: predefined ? categoryAction(ctx, predefined) : undefined,
       items: items
@@ -966,11 +1721,20 @@ function verificationDetail(ctx, url, error) {
   return {
     pageType: 'detail',
     id: makeItemId(url, title, ''),
-    title: title,
-    type: 'movie',
+    title: '需要真人验证',
+    type: 'collection',
+    mediaType: 'collection',
     overview: cleanText(error && error.message) || '站点触发了 Cloudflare 真人验证。请返回列表页点击手动验证卡片，完成后刷新。',
     detailImageAspectRatio: '16:9',
-    resourceGroups: playbackGroups(url, title, '', ctx),
+    playable: false,
+    isPlayable: false,
+    resourceGroups: [],
+    mediaSources: [],
+    playbackSummary: {
+      versionCount: 0,
+      episodeCount: 0,
+      defaultVersionId: ''
+    },
     recommendations: [
       {
         id: 'verify',
@@ -983,21 +1747,143 @@ function verificationDetail(ctx, url, error) {
 }
 
 function verificationCard(ctx, title, url, error) {
+  const targetURL = url || entryURL(ctx);
+  const pageId = verificationPageId(targetURL);
   return {
-    id: 'verify-cloudflare-' + encodeURIComponent(url || entryURL(ctx)).slice(0, 120),
+    id: pageId,
     title: title || '手动完成验证',
     subtitle: '点击后再打开验证界面，完成后返回刷新',
     overview: cleanText(error && error.message) || '当前网络触发了 Cloudflare 真人验证。',
-    type: 'collection',
+    type: 'category',
+    mediaType: 'category',
+    playable: false,
+    isPlayable: false,
     aspectRatio: '16:9',
     action: {
-      type: 'custom',
-      name: 'verifyCloudflare',
-      id: 'verifyCloudflare',
+      type: 'category',
+      id: pageId,
+      pageId: pageId,
       title: '手动完成验证',
-      payload: { url: url || entryURL(ctx) }
+      url: targetURL,
+      itemAspectRatio: '16:9'
     }
   };
+}
+
+async function runVerificationCategory(ctx, pageId, url) {
+  const requestedPage = Math.max(pageFromContext(ctx, 1), pageFromURL(url, 1));
+  if (requestedPage > 1 || isVerifiedTargetHTML(ctx, url, getCachedText(ctx, url))) {
+    return resumeVerifiedCategory(ctx, pageId, url, requestedPage);
+  }
+  let html = await browserHTML(ctx, url, url, true);
+  if (!isVerifiedTargetHTML(ctx, url, html)) {
+    const refreshedHTML = await fetchAfterVerification(ctx, url);
+    if (isVerifiedTargetHTML(ctx, url, refreshedHTML)) html = refreshedHTML;
+  }
+  const ok = isVerifiedTargetHTML(ctx, url, html);
+  if (ok) {
+    setCachedText(ctx, url, html);
+    if (isActressWorksURL(url) || isActressIndexURL(url)) {
+      resetCategoryState(ctx, normalizePageId(ctx, url));
+      return resumeVerifiedCategory(ctx, pageId, url, 1);
+    }
+  }
+  const retryCard = verificationCard(
+    ctx,
+    '验证未完成，点击重新验证',
+    url,
+    new Error('浏览器尚未返回可读取的影片页面')
+  );
+  return {
+    pageType: 'category',
+    id: pageId,
+    title: ok ? '验证完成' : '验证未完成',
+    style: 'media.posterGrid',
+    itemAspectRatio: '16:9',
+    page: 1,
+    hasMore: false,
+    items: ok
+      ? [{
+          id: pageId + '-success',
+          title: '验证完成',
+          subtitle: '请返回原页面继续浏览',
+          type: 'collection',
+          mediaType: 'collection',
+          playable: false,
+          isPlayable: false,
+          aspectRatio: '16:9',
+          action: { type: 'none' }
+        }]
+      : [retryCard]
+  };
+}
+
+async function resumeVerifiedCategory(ctx, verificationPageId, targetURL, page) {
+  const stablePageId = normalizePageId(ctx, targetURL);
+  const resumedContext = Object.assign({}, ctx || {}, {
+    id: stablePageId,
+    pageId: stablePageId,
+    page: page,
+    currentPage: page,
+    pageIndex: page
+  });
+  let result = await getCategory(resumedContext);
+  result.id = stablePageId;
+  result.verificationTarget = targetURL;
+  return result;
+}
+
+function resetCategoryState(ctx, pageId) {
+  const key = categoryStateKey(ctx, pageId);
+  delete memoryCache()[key];
+  cacheSet(key, { pages: {}, expiresAt: 0 });
+}
+
+function isVerifiedTargetHTML(ctx, url, html) {
+  if (!isUsableHTML(html)) return false;
+  if (isActressWorksURL(url)) {
+    return parseCards(html, pageTitle(html) || '女优作品', ctx).length > 0;
+  }
+  if (isActressIndexURL(url)) {
+    return parseCategoryCards(ctx, html, /\/ranking$/i.test(pathOf(url)) ? '女优排行' : '女优一览').length > 0;
+  }
+  return true;
+}
+
+async function fetchAfterVerification(ctx, url) {
+  const retryContext = Object.assign({}, ctx || {}, {
+    requestTimeoutSeconds: Math.min(numberParam(ctx, 'requestTimeoutSeconds', 45), 6)
+  });
+  for (let attempt = 0; attempt < 1; attempt += 1) {
+    try {
+      await verificationCookieDelay(500);
+      const options = requestOptions(retryContext, url);
+      options.useBrowserFallback = false;
+      options.browserFallback = false;
+      options.allowBrowserFallback = false;
+      options.useBrowserCookie = true;
+      options.attachBrowserCookie = true;
+      const response = await httpGet(url, options);
+      const html = responseText(response);
+      if (isVerifiedTargetHTML(ctx, url, html)) return html;
+    } catch (error) {
+      // Return a retry card quickly instead of leaving the verification page spinning.
+    }
+  }
+  return '';
+}
+
+function verificationCookieDelay(milliseconds) {
+  if (typeof Promise === 'undefined') return null;
+  if (typeof setTimeout !== 'function') return Promise.resolve();
+  return new Promise(function (resolve) {
+    setTimeout(resolve, milliseconds);
+  });
+}
+
+function pageFromURL(url, fallback) {
+  const match = String(url || '').match(/[?&]page=(\d+)/i);
+  return positiveInt(match && match[1], fallback);
 }
 
 function categoryAction(ctx, section) {
@@ -1012,32 +1898,65 @@ function categoryAction(ctx, section) {
 
 function parseCategoryCards(ctx, html, fallbackTitle) {
   const source = categoryListBlock(html, fallbackTitle);
-  const items = [];
-  const seen = {};
-  anchorsIn(source).forEach(function (anchor) {
-    const href = anchor.href;
-    const title = cleanText(anchor.text || anchor.title);
-    if (!title || seen[href + title] || isJunkCategoryTitle(title)) return;
-    if (!isCategoryHref(href)) return;
+  const records = {};
+  const order = [];
+  const pattern = /<a\b([^>]*)>([\s\S]*?)<\/a>/gi;
+  let match;
+  while ((match = pattern.exec(source))) {
+    const href = attr(match[1], 'href');
+    if (!isCategoryHref(href)) continue;
     const url = absoluteURL(ctx, href);
-    seen[href + title] = true;
-    items.push({
-      id: 'category-link-' + items.length + '-' + encodeURIComponent(title),
-      title: title,
+    const rawTitle = cleanText(firstNonEmpty(
+      attr(match[1], 'title'),
+      attr(match[2], 'alt'),
+      match[2]
+    ));
+    const title = categoryCardTitle(rawTitle);
+    const image = absoluteURL(ctx, pickImage(match[0]));
+    if (!records[url]) {
+      records[url] = { url: url, title: '', image: '' };
+      order.push(url);
+    }
+    if (title && !isJunkCategoryTitle(title)) records[url].title = records[url].title || title;
+    if (image) records[url].image = records[url].image || image;
+  }
+
+  return order.map(function (url, index) {
+    const record = records[url];
+    if (!record || !record.title) return null;
+    const item = {
+      id: 'category-link-' + index + '-' + encodeURIComponent(record.title),
+      title: record.title,
       subtitle: fallbackTitle || '分类',
       type: 'category',
-      aspectRatio: '16:9',
+      mediaType: 'category',
+      playable: false,
+      isPlayable: false,
+      aspectRatio: record.image ? '2:3' : '16:9',
       action: {
         type: 'category',
-        id: url,
-        pageId: url,
-        title: title,
-        url: url,
+        id: record.url,
+        pageId: record.url,
+        title: record.title,
+        url: record.url,
         itemAspectRatio: '16:9'
       }
-    });
-  });
-  return items.slice(0, 80);
+    };
+    if (record.image) {
+      item.poster = record.image;
+      item.thumbnailURL = record.image;
+      item.imageHeaders = imageHeaders(ctx, record.url);
+    }
+    return item;
+  }).filter(Boolean).slice(0, 120);
+}
+
+function categoryCardTitle(value) {
+  return cleanText(value)
+    .replace(/\s+\d+\s*(?:条|部)影片[\s\S]*$/i, '')
+    .replace(/\s+\d{4}\s*出道[\s\S]*$/i, '')
+    .replace(/\s+第\s*\d+\s*名[\s\S]*$/i, '')
+    .trim();
 }
 
 function categoryListBlock(html, title) {
@@ -1045,9 +1964,8 @@ function categoryListBlock(html, title) {
   const heading = cleanText(title || '');
   const index = heading ? source.search(new RegExp('<h1[^>]*>\\s*' + escapeRegExp(heading), 'i')) : -1;
   if (index < 0) return source;
-  const nextScript = source.indexOf('<script', index);
   const nextFooter = source.indexOf('<footer', index);
-  const endCandidates = [nextScript, nextFooter].filter(function (value) { return value > index; }).sort(function (a, b) { return a - b; });
+  const endCandidates = [nextFooter].filter(function (value) { return value > index; });
   return source.slice(index, endCandidates[0] || undefined);
 }
 
@@ -1083,6 +2001,25 @@ function parseCards(html, fallbackTitle, ctx) {
   return items;
 }
 
+function mediaListBlock(html) {
+  const source = String(html || '');
+  if (!source) return source;
+  const anchorPattern = /<a\b([^>]*)>([\s\S]*?)<\/a>/gi;
+  let match;
+  let firstMediaIndex = -1;
+  while ((match = anchorPattern.exec(source))) {
+    if (!isDetailHref(attr(match[1], 'href'))) continue;
+    firstMediaIndex = match.index;
+    break;
+  }
+  if (firstMediaIndex < 0) return source;
+  const headingIndex = source.lastIndexOf('<h1', firstMediaIndex);
+  const mainIndex = source.lastIndexOf('<main', firstMediaIndex);
+  const start = Math.max(headingIndex, mainIndex, 0);
+  const footerIndex = source.indexOf('<footer', firstMediaIndex);
+  return source.slice(start, footerIndex > firstMediaIndex ? footerIndex : undefined);
+}
+
 function mediaBlocks(html) {
   const source = String(html || '');
   const blocks = [];
@@ -1114,7 +2051,9 @@ function expandBlock(source, start, end, fallback) {
     .sort(function (a, b) { return a - b; })[0];
   const realEnd = close || (nextDetail >= 0 ? end + nextDetail : Math.min(source.length, end + 1800));
   const block = source.slice(realStart, realEnd);
-  return isDetailHref(block) ? block : fallback;
+  return anchorsIn(block).some(function (anchor) {
+    return isDetailHref(anchor.href);
+  }) ? block : fallback;
 }
 
 function parseCard(block, fallbackTitle, rank, ctx) {
@@ -1188,40 +2127,239 @@ function toWideItem(item) {
   return item;
 }
 
-function playbackGroups(detailURL, title, playUrl, ctx) {
-  const id = encodePayload({ url: detailURL, title: title, playUrl: playUrl || '' });
+async function playbackGroups(detailURL, title, playUrl, ctx, html) {
+  if (!isPlayableURL(playUrl)) return [];
   const headers = playbackHeaders(ctx || {}, detailURL);
+  const qualities = await discoverAvailableQualities(ctx || {}, playUrl, detailURL, html);
+  if (!qualities.length && containerOf(playUrl) === 'm3u8' && !qualityHeightFromURL(playUrl)) return [];
+  const sourceQualities = qualities.length ? qualities : [
+    {
+      height: qualityHeightFromURL(playUrl),
+      label: qualityHeightFromURL(playUrl) ? qualityHeightFromURL(playUrl) + 'P' : '自动画质',
+      url: playUrl
+    }
+  ];
+  const versions = sourceQualities.map(function (quality, index) {
+    const id = encodePayload({
+      url: detailURL,
+      title: title,
+      quality: quality.height || 'auto'
+    });
+    return {
+      id: id,
+      title: quality.label,
+      name: quality.label,
+      subtitle: index === 0 ? '最高可用画质' : '切换时请稍候',
+      url: quality.url,
+      playUrl: quality.url,
+      path: quality.url,
+      default: index === 0,
+      availability: 'playable',
+      container: containerOf(quality.url),
+      headers: headers,
+      header: headers,
+      Header: headers,
+      customHeaders: headers,
+      sourceName: 'MissAV',
+      action: {
+        type: 'play',
+        itemId: id,
+        versionId: id,
+        title: title || 'MissAV'
+      }
+    };
+  });
   return [
     {
       id: 'missav-online',
       title: '在线播放',
-      versions: [
-        {
-          id: id,
-          title: 'MissAV HLS',
-          name: '默认线路',
-          subtitle: 'MissAV',
-          url: playUrl || detailURL,
-          playUrl: playUrl || '',
-          path: playUrl || detailURL,
-          default: true,
-          availability: 'playable',
-          container: 'm3u8',
-          headers: headers,
-          header: headers,
-          Header: headers,
-          customHeaders: headers,
-          sourceName: 'MissAV',
-          action: {
-            type: 'play',
-            itemId: id,
-            versionId: id,
-            title: title || 'MissAV'
-          }
-        }
-      ]
+      versions: versions
     }
   ];
+}
+
+function resourceVersionCount(groups) {
+  return (groups || []).reduce(function (total, group) {
+    return total + (Array.isArray(group && group.versions) ? group.versions.length : 0);
+  }, 0);
+}
+
+async function discoverAvailableQualities(ctx, playlistURL, referer, html) {
+  const candidates = extractHTMLQualities(html, ctx);
+  if (isPlayableURL(playlistURL)) {
+    const height = qualityHeightFromURL(playlistURL);
+    candidates.push({
+      height: height,
+      label: height ? height + 'P' : '自动画质',
+      url: playlistURL
+    });
+  }
+
+  const urls = unique(candidates.map(function (item) { return item.url; })).slice(0, 8);
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(2, urls.length) }, async function () {
+    while (next < urls.length) {
+      remainingPlaybackSeconds(ctx, 5);
+      const variants = await discoverQualities(ctx, urls[next++], referer);
+      variants.forEach(function (quality) { candidates.push(quality); });
+    }
+  }));
+  return normalizeQualities(candidates);
+}
+
+function extractHTMLQualities(html, ctx) {
+  const source = decodeEscapes(String(html || '') + '\n' + unpackPackedScripts(html).join('\n'));
+  const qualities = [];
+  const assignment = /\b(source(?:[_-]?\d{3,4})?|videoUrl|video_url|hlsUrl)\s*[:=]\s*["']([^"']+\.(?:m3u8|mp4|mpd)[^"']*)["']/gi;
+  let match;
+  while ((match = assignment.exec(source))) {
+    const url = absoluteURL(ctx, decodeEscapes(match[2]));
+    if (!isPlayableURL(url)) continue;
+    const width = Number(firstMatch(match[1], /(\d{3,4})/)) || 0;
+    const height = qualityHeightFromURL(url) || qualityHeightFromWidth(width);
+    qualities.push({
+      height: height,
+      width: width,
+      label: height ? height + 'P' : '自动画质',
+      url: url
+    });
+  }
+
+  const labeledSource = /(?:label|quality)\s*:\s*["'](\d{3,4})p?["'][\s\S]{0,240}?(?:file|src|url)\s*:\s*["']([^"']+\.(?:m3u8|mp4|mpd)[^"']*)["']/gi;
+  while ((match = labeledSource.exec(source))) {
+    const url = absoluteURL(ctx, decodeEscapes(match[2]));
+    if (!isPlayableURL(url)) continue;
+    const height = Number(match[1]) || qualityHeightFromURL(url);
+    qualities.push({ height: height, label: height + 'P', url: url });
+  }
+  return normalizeQualities(qualities);
+}
+
+function qualityHeightFromWidth(width) {
+  const value = Number(width) || 0;
+  if (value >= 1900) return 1080;
+  if (value >= 1200) return 720;
+  if (value >= 800) return 480;
+  if (value >= 600) return 360;
+  if (value >= 400) return 240;
+  return 0;
+}
+
+function normalizeQualities(qualities) {
+  const output = [];
+  const seenHeight = {};
+  const seenURL = {};
+  (qualities || []).sort(function (a, b) {
+    return (b.height || 0) - (a.height || 0) || (b.bandwidth || 0) - (a.bandwidth || 0);
+  }).forEach(function (quality) {
+    const url = stringValue(quality && quality.url);
+    if (!url || seenURL[url]) return;
+    const height = Number(quality.height) || qualityHeightFromURL(url);
+    if (height && seenHeight[String(height)]) return;
+    seenURL[url] = true;
+    if (height) seenHeight[String(height)] = true;
+    output.push({
+      height: height,
+      width: Number(quality.width) || 0,
+      bandwidth: Number(quality.bandwidth) || 0,
+      label: height ? height + 'P' : stringValue(quality.label) || '自动画质',
+      url: url
+    });
+  });
+  const hasNamedQuality = output.some(function (quality) { return quality.height > 0; });
+  return hasNamedQuality
+    ? output.filter(function (quality) { return quality.height > 0; })
+    : output;
+}
+
+async function discoverQualities(ctx, playlistURL, referer) {
+  if (!isPlayableURL(playlistURL) || containerOf(playlistURL) !== 'm3u8') return [];
+  try {
+    const response = await httpGet(playlistURL, {
+      headers: playbackHeaders(ctx || {}, referer || playlistURL),
+      timeout: remainingPlaybackSeconds(ctx, 5),
+      timeoutSeconds: remainingPlaybackSeconds(ctx, 5),
+      useBrowserCookie: true,
+      attachBrowserCookie: true
+    });
+    const playlist = responseText(response);
+    if (playlist.indexOf('#EXT-X-STREAM-INF') < 0) return [];
+    return parseMasterQualities(playlist, playlistURL);
+  } catch (error) {
+    return [];
+  }
+}
+
+function parseMasterQualities(playlist, playlistURL) {
+  const lines = String(playlist || '').split(/\r?\n/);
+  const qualities = [];
+  const seen = {};
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index].trim();
+    if (line.indexOf('#EXT-X-STREAM-INF:') !== 0) continue;
+    const resolution = line.match(/\bRESOLUTION=(\d+)x(\d+)/i);
+    const bandwidth = Number(firstMatch(line, /\b(?:AVERAGE-)?BANDWIDTH=(\d+)/i)) || 0;
+    let uri = '';
+    for (let next = index + 1; next < lines.length; next += 1) {
+      const candidate = lines[next].trim();
+      if (!candidate) continue;
+      if (candidate[0] === '#') break;
+      uri = candidate;
+      break;
+    }
+    if (!uri) continue;
+    const height = resolution ? Number(resolution[2]) : qualityHeightFromURL(uri);
+    const url = resolveRelativeURL(playlistURL, uri);
+    const key = String(height || 0) + '|' + url;
+    if (!url || seen[key]) continue;
+    seen[key] = true;
+    qualities.push({
+      height: height,
+      width: resolution ? Number(resolution[1]) : 0,
+      bandwidth: bandwidth,
+      label: height ? height + 'P' : '自动画质',
+      url: url
+    });
+  }
+  return qualities.sort(function (a, b) {
+    return (b.height || 0) - (a.height || 0) || (b.bandwidth || 0) - (a.bandwidth || 0);
+  });
+}
+
+function selectQuality(qualities, requestedQuality) {
+  const list = Array.isArray(qualities) ? qualities : [];
+  if (!list.length) return null;
+  const requested = Number(requestedQuality);
+  if (requested > 0) {
+    const exact = list.find(function (item) { return Number(item.height) === requested; });
+    if (exact) return exact;
+  }
+  return list[0];
+}
+
+function qualityHeightFromURL(url) {
+  const match = String(url || '').match(/(?:^|[\/_.-])(\d{3,4})p(?:[\/_.?#-]|$)/i);
+  return match ? Number(match[1]) : 0;
+}
+
+function resolveRelativeURL(base, value) {
+  const target = decodeEscapes(String(value || '').trim());
+  if (!target) return '';
+  if (/^https?:\/\//i.test(target)) return target;
+  if (target.indexOf('//') === 0) return 'https:' + target;
+  const origin = originOf(base);
+  if (target[0] === '/') return origin + target;
+  const directory = String(base || '').replace(/[?#].*$/, '').replace(/\/[^/]*$/, '/');
+  const combined = directory + target;
+  const prefix = firstMatch(combined, /^(https?:\/\/[^/]+)/i);
+  const path = combined.slice(prefix.length).split('/');
+  const normalized = [];
+  path.forEach(function (part) {
+    if (!part || part === '.') return;
+    if (part === '..') normalized.pop();
+    else normalized.push(part);
+  });
+  return prefix + '/' + normalized.join('/');
 }
 
 function playbackResult(ctx, url, referer) {
@@ -1254,9 +2392,9 @@ function playbackResult(ctx, url, referer) {
 function extractPlayableURL(html) {
   const source = decodeEscapes(String(html || '') + '\n' + unpackPackedScripts(html).join('\n'));
   return firstPlayable(
+    firstMatch(source, /\bsource\s*=\s*["']([^"']+\.(?:m3u8|mp4|mpd)[^"']*)["']/i),
     firstMatch(source, /source1280\s*=\s*["']([^"']+\.(?:m3u8|mp4|mpd)[^"']*)["']/i),
     firstMatch(source, /source842\s*=\s*["']([^"']+\.(?:m3u8|mp4|mpd)[^"']*)["']/i),
-    firstMatch(source, /source\s*=\s*["']([^"']+\.(?:m3u8|mp4|mpd)[^"']*)["']/i),
     firstMatch(source, /var\s+hlsUrl\s*=\s*["']([^"']+\.(?:m3u8|mp4|mpd)[^"']*)["']/i),
     firstMatch(source, /<video\b[^>]*\b(?:data-src|src)\s*=\s*["']([^"']+\.(?:m3u8|mp4|mpd)[^"']*)["']/i),
     firstMatch(source, /source\s+src\s*=\s*["']([^"']+\.(?:m3u8|mp4|mpd)[^"']*)["']/i),
@@ -1336,6 +2474,16 @@ function playUrlFromContext(ctx) {
   );
 }
 
+function qualityFromContext(ctx) {
+  const payload = decodePayload(ctx && (ctx.versionId || ctx.sourceId || ctx.id || ctx.itemId));
+  return firstNonEmpty(
+    payload && payload.quality,
+    ctx && ctx.quality,
+    ctx && ctx.height,
+    ctx && ctx.resolution
+  );
+}
+
 function makeItemId(url, title, poster) {
   return encodePayload({ url: absoluteURL(null, url), title: title || '', poster: poster || '' });
 }
@@ -1358,6 +2506,29 @@ function encodePayload(data) {
   return MISSAV_DETAIL_PAYLOAD_PREFIX + parts.join('&');
 }
 
+function verificationPageId(url) {
+  return MISSAV_VERIFY_PAYLOAD_PREFIX + 'url=' + encodeURIComponent(String(url || MISSAV_DEFAULT_BASE));
+}
+
+function verificationUrlFromPageId(value) {
+  const text = stringValue(value);
+  if (text.indexOf(MISSAV_VERIFY_PAYLOAD_PREFIX) !== 0) return '';
+  const parts = text.slice(MISSAV_VERIFY_PAYLOAD_PREFIX.length).split('&');
+  for (let index = 0; index < parts.length; index += 1) {
+    const part = parts[index];
+    const separator = part.indexOf('=');
+    const key = separator >= 0 ? part.slice(0, separator) : part;
+    if (key !== 'url') continue;
+    const raw = separator >= 0 ? part.slice(separator + 1) : '';
+    try {
+      return decodeURIComponent(raw);
+    } catch (error) {
+      return raw;
+    }
+  }
+  return '';
+}
+
 function decodePayload(value) {
   const text = stringValue(value);
   if (text.indexOf(MISSAV_DETAIL_PAYLOAD_PREFIX) !== 0) return null;
@@ -1377,6 +2548,7 @@ function decodePayload(value) {
 
 function normalizePageId(ctx, value) {
   const id = stringValue(value) || 'new-release';
+  if (id.indexOf(MISSAV_VERIFY_PAYLOAD_PREFIX) === 0) return id;
   const section = findSection(id);
   if (section) return section.id;
   const primary = findPrimaryCategory(id);
@@ -1400,7 +2572,7 @@ function findSection(id) {
 
 function findPrimaryCategory(id) {
   const value = stringValue(id);
-  return MISSAV_PRIMARY_CATEGORIES.find(function (item) {
+  return MISSAV_SECTIONS.find(function (item) {
     return item.id === value ||
       item.title === value ||
       item.path === value ||
@@ -1411,7 +2583,26 @@ function findPrimaryCategory(id) {
 
 function isDetailHref(href) {
   const value = String(href || '');
-  return /\/(?:dm\d+\/)?cn\/(?!new(?:[/?#]|$)|search(?:[/?#]|$)|genres?(?:[/?#]|$)|makers?(?:[/?#]|$)|actresses?(?:[/?#]|$)|actors?(?:[/?#]|$)|today-hot|weekly-hot|monthly-hot|uncensored-leak|chinese-subtitle|fc2(?:[/?#]|$)|heyzo(?:[/?#]|$)|tokyo-hot(?:[/?#]|$)|1pondo(?:[/?#]|$)|caribbeancom(?:[/?#]|$)|caribbeancompr(?:[/?#]|$)|10musume(?:[/?#]|$)|pacopacomama(?:[/?#]|$)|gachinco(?:[/?#]|$)|xxx-av(?:[/?#]|$)|siro(?:[/?#]|$)|luxu(?:[/?#]|$)|gana(?:[/?#]|$)|prestige-premium(?:[/?#]|$)|s-cute(?:[/?#]|$)|ara(?:[/?#]|$)|madou(?:[/?#]|$)|twav(?:[/?#]|$)|vr(?:[/?#]|$)|history|playlist|favorite|login|register)[^"'#?\/]+/i.test(value);
+  if (findSection(value)) return false;
+  if (isCategoryHref(value)) return false;
+  const path = value
+    .replace(/^https?:\/\/[^/]+/i, '')
+    .split(/[?#]/)[0]
+    .replace(/^\/+|\/+$/g, '');
+  const parts = path.split('/').filter(Boolean);
+  if (/^dm\d+$/i.test(parts[0] || '')) parts.shift();
+  if (/^(?:cn|en|ja|ko|ms|th|de|fr|vi|id)$/i.test(parts[0] || '')) parts.shift();
+  if (parts.length !== 1) return false;
+  const slug = parts[0] || '';
+  if (/^(?:new|release|random|search|history|playlists?|saved|favorite|login|register|vip)$/i.test(slug)) return false;
+  // Most MissAV codes use a hyphen (for example abc-123), while the
+  // 1pondo/Caribbeancompr/10musume/pacopacomama feeds use date-based
+  // underscore IDs such as pondo-072526_001 and 051726_001.
+  const standardCode = /^[a-z0-9]+(?:[-_][a-z0-9]+)*$/i.test(slug) &&
+    /[a-z]/i.test(slug) &&
+    /\d/.test(slug);
+  const dateOnlyCode = /^\d{6}_\d{2,3}$/i.test(slug);
+  return standardCode || dateOnlyCode;
 }
 
 function categorySlug(value) {
@@ -1425,6 +2616,21 @@ function hasNextPage(html, page) {
   if (/下一页|Next/i.test(source)) return true;
   const total = Number(firstMatch(source, /\/\s*(\d{2,})\s*(?:使用键盘|返回|$)/i));
   return total ? page < total : false;
+}
+
+function paginationInfo(html, page, itemCount) {
+  const source = String(html || '');
+  let totalPages = 0;
+  const pagePattern = /[?&]page=(\d+)/gi;
+  let match;
+  while ((match = pagePattern.exec(source))) {
+    totalPages = Math.max(totalPages, Number(match[1]) || 0);
+  }
+  const hasMore = hasNextPage(source, page) || (!totalPages && Number(itemCount) >= 12);
+  return {
+    hasMore: hasMore,
+    totalPages: totalPages || undefined
+  };
 }
 
 function sectionBlock(html, title) {
@@ -1856,4 +3062,39 @@ if (typeof globalThis !== 'undefined') {
 
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = MissAVMiniLibrary;
+}
+
+async function withPlaybackBudget(input, operation) {
+  let ctx = input;
+  if (typeof ctx === 'string') { try { ctx = JSON.parse(ctx); } catch (_) { ctx = {}; } }
+  ctx = Object.assign({}, ctx && typeof ctx === 'object' ? ctx : {});
+  const budget = { endAt: Date.now() + 28000, expired: false, browserCalls: 0 };
+  ctx.__playbackBudget = budget;
+  let timer;
+  try {
+    const timeout = new Promise(function (_, reject) {
+      timer = setTimeout(function () { budget.expired = true; reject(new Error('播放解析超时；stage=total-deadline；请稍后重试')); }, 28000);
+    });
+    return await Promise.race([Promise.resolve().then(function () { return operation(ctx); }), timeout]);
+  } finally { clearTimeout(timer); budget.expired = true; }
+}
+
+function remainingPlaybackSeconds(ctx, limit) {
+  const budget = ctx && ctx.__playbackBudget;
+  if (!budget) return limit;
+  const remaining = (budget.endAt - Date.now()) / 1000;
+  if (budget.expired || remaining <= 0) throw new Error('播放解析超时；stage=total-deadline');
+  return Math.max(0.1, Math.min(limit, remaining));
+}
+
+function playbackBrowserSeconds(ctx, limit, maxCalls) {
+  const timeout = remainingPlaybackSeconds(ctx, limit);
+  const budget = ctx && ctx.__playbackBudget;
+  if (budget && budget.browserCalls >= maxCalls) throw new Error('浏览器回退次数已用完；stage=browser-fallback-limit');
+  if (budget) budget.browserCalls++;
+  return timeout;
+}
+
+async function resolvePlayback(input) {
+  return withPlaybackBudget(input, resolvePlaybackWithinBudget);
 }

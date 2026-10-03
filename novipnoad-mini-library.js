@@ -32,8 +32,8 @@ function getManifest() {
   return {
     id: 'novipnoad',
     name: 'NO视频',
-    version: '1.0.0',
-    author: 'baiPlay',
+    version: '1.0.1',
+    author: 'Alan huang',
     logo: NOVIPNOAD_LOGO,
     description:
       'NO视频自定义媒体库示例。站点主页启用了 Cloudflare 浏览器校验，纯 HTTP 运行环境可能需要写入 novipnoad.cf.cookie 或由 App 提供浏览器代理请求。',
@@ -630,10 +630,10 @@ function getResourceVersions(ext) {
   return buildResourceGroups(itemId, vid, episode ? episode.title : '');
 }
 
-function resolvePlayback(ext) {
+async function resolvePlaybackWithinBudget(ext) {
   const itemId = ext.itemId || ext.id || '';
   const detailURL = siteURL(itemId);
-  const html = fetchText(itemId);
+  const html = await requestPlaybackURL(detailURL, BASE + "/", ext);
   const playInfo = parsePlayInfo(html);
   const episodes = parseEpisodes(html, itemId, '');
   const requested = ext.versionId || ext.episodeId || playInfo.vid || '';
@@ -649,13 +649,13 @@ function resolvePlayback(ext) {
   const playerURL =
     PLAYER_BASE + '/v1/?url=' + encodeURIComponent(vid) + '&pkey=' + pkey + '&ref=' + encodeURIComponent(refPath);
   const playerFrameURL = PLAYER_BASE + '/v1/player.php?id=' + encodeURIComponent(vid);
-  const browserResult = browserFetchPlayer(playerURL, detailURL);
+  const browserResult = await browserFetchPlayer(playerURL, detailURL, ext);
   const directPlayback = playbackFromBrowserResult(browserResult, playerFrameURL);
   if (directPlayback) return directPlayback;
 
   let vkey = extractBrowserVkey(browserResult);
   if (!vkey || !vkey.ckey) {
-    const playerHTML = fetchPlayer(playerURL, detailURL);
+    const playerHTML = await requestPlaybackURL(playerURL, detailURL, ext);
     vkey = extractVkey(playerHTML);
   }
   if (!vkey || !vkey.ckey) throw new Error('NO视频播放器校验未通过，无法生成播放密钥');
@@ -673,7 +673,7 @@ function resolvePlayback(ext) {
     encodeURIComponent(vkey.ip || '') +
     '&time=' +
     encodeURIComponent(vkey.time || '');
-  const encJS = fetchPlayer(encURL, playerFrameURL);
+  const encJS = await requestPlaybackURL(encURL, playerFrameURL, ext);
   const payload = firstMatch(encJS, /JSON\.decrypt\(["']([^"']+)["']\)/i);
   if (!payload) throw new Error('NO视频没有返回可解密播放信息');
 
@@ -707,12 +707,13 @@ function playbackHeaders(referer) {
   };
 }
 
-function browserFetchPlayer(url, referer) {
+async function browserFetchPlayer(url, referer, ctx) {
   if (!Widget.browser || typeof Widget.browser.fetch !== 'function') return null;
   try {
-    return Widget.browser.fetch(url, {
+    return await Widget.browser.fetch(url, {
       visible: false,
-      timeout: 60,
+      timeout: playbackBrowserSeconds(ctx, 12, 1),
+      timeoutSeconds: remainingPlaybackSeconds(ctx, 12),
       waitAfterLoad: 1.0,
       waitForSessionStorageKey: 'vkey',
       waitForMediaSource: true,
@@ -1074,4 +1075,50 @@ function matchMovie(ext) {
 
 function matchEpisode(ext) {
   return matchResources(ext);
+}
+
+async function withPlaybackBudget(input, operation) {
+  let ctx = input;
+  if (typeof ctx === 'string') { try { ctx = JSON.parse(ctx); } catch (_) { ctx = {}; } }
+  ctx = Object.assign({}, ctx && typeof ctx === 'object' ? ctx : {});
+  const budget = { endAt: Date.now() + 28000, expired: false, browserCalls: 0 };
+  ctx.__playbackBudget = budget;
+  let timer;
+  try {
+    const timeout = new Promise(function (_, reject) {
+      timer = setTimeout(function () { budget.expired = true; reject(new Error('播放解析超时；stage=total-deadline；请稍后重试')); }, 28000);
+    });
+    return await Promise.race([Promise.resolve().then(function () { return operation(ctx); }), timeout]);
+  } finally { clearTimeout(timer); budget.expired = true; }
+}
+
+function remainingPlaybackSeconds(ctx, limit) {
+  const budget = ctx && ctx.__playbackBudget;
+  if (!budget) return limit;
+  const remaining = (budget.endAt - Date.now()) / 1000;
+  if (budget.expired || remaining <= 0) throw new Error('播放解析超时；stage=total-deadline');
+  return Math.max(0.1, Math.min(limit, remaining));
+}
+
+function playbackBrowserSeconds(ctx, limit, maxCalls) {
+  const timeout = remainingPlaybackSeconds(ctx, limit);
+  const budget = ctx && ctx.__playbackBudget;
+  if (budget && budget.browserCalls >= maxCalls) throw new Error('浏览器回退次数已用完；stage=browser-fallback-limit');
+  if (budget) budget.browserCalls++;
+  return timeout;
+}
+
+async function resolvePlayback(input) {
+  return withPlaybackBudget(input, resolvePlaybackWithinBudget);
+}
+
+async function requestPlaybackURL(url, referer, ctx) {
+  const headers = { 'User-Agent': UA, Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8', Referer: referer || BASE + '/' };
+  const cookie = getCookieHeader(); if (cookie) headers.Cookie = cookie;
+  const timeout = remainingPlaybackSeconds(ctx, 6);
+  const response = await Widget.http.get(url, { headers, timeout, timeoutSeconds: timeout });
+  if (Number(response && (response.status || response.statusCode)) >= 400) throw new Error('NO视频源站请求失败');
+  const data = response && typeof response.data === 'string' ? response.data : response && typeof response.body === 'string' ? response.body : '';
+  if (!data || isCloudflareChallenge(data, response && response.status, response && response.headers || {})) throw new Error('NO视频播放器页面为空或需要浏览器验证');
+  return data;
 }

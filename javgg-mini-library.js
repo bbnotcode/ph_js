@@ -9,7 +9,7 @@ const WidgetMetadata = {
   id: 'javgg-mini-library',
   name: 'JAVGG',
   title: 'JAVGG',
-  version: '1.0.0',
+  version: '1.0.1',
   requiredVersion: '0.0.1',
   author: 'Alan huang',
   site: JAVGG_DEFAULT_BASE,
@@ -235,7 +235,7 @@ async function getResourceVersions(rawCtx) {
   return groups;
 }
 
-async function resolvePlayback(rawCtx) {
+async function resolvePlaybackWithinBudget(rawCtx) {
   const ctx = normalizeContext(rawCtx);
   const payload = decodePayload(firstNonEmpty(ctx.versionId, ctx.itemId, ctx.id));
   let playerUrl = firstNonEmpty(ctx.playerUrl, payload.playerUrl);
@@ -418,7 +418,7 @@ async function resolvePlayerMedia(ctx, playerUrl, detailUrl) {
   } catch (error) {
     playable = '';
   }
-  if (!playable) playable = await extractFromBrowser(playerUrl, detailUrl);
+  if (!playable) playable = await extractFromBrowser(playerUrl, detailUrl, ctx);
   return playable;
 }
 
@@ -453,6 +453,7 @@ function resolveRelativeURL(base, value) {
 async function fetchText(ctx, url, referer) {
   const response = await httpGet(url, {
     headers: requestHeaders(referer || url),
+    timeout: remainingPlaybackSeconds(ctx, 6), timeoutSeconds: remainingPlaybackSeconds(ctx, 6),
     useBrowserCookie: false,
     attachBrowserCookie: false,
     useBrowserFallback: false,
@@ -482,12 +483,13 @@ async function httpGet(url, options) {
   throw new Error('当前环境没有可用的 HTTP 客户端');
 }
 
-async function extractFromBrowser(url, referer) {
+async function extractFromBrowser(url, referer, ctx) {
   if (typeof Widget === 'undefined' || !Widget.browser || typeof Widget.browser.fetch !== 'function') return '';
   try {
     const result = await Widget.browser.fetch(url, {
       visible: false,
-      timeout: 70,
+      timeout: playbackBrowserSeconds(ctx, 12, 1),
+      timeoutSeconds: remainingPlaybackSeconds(ctx, 12),
       waitAfterLoad: 4,
       waitForAny: true,
       waitForMediaSource: true,
@@ -805,3 +807,38 @@ if (typeof globalThis !== 'undefined') {
   Object.keys(exported).forEach(function (key) { globalThis[key] = exported[key]; });
 }
 if (typeof module !== 'undefined' && module.exports) module.exports = exported;
+
+async function withPlaybackBudget(input, operation) {
+  let ctx = input;
+  if (typeof ctx === 'string') { try { ctx = JSON.parse(ctx); } catch (_) { ctx = {}; } }
+  ctx = Object.assign({}, ctx && typeof ctx === 'object' ? ctx : {});
+  const budget = { endAt: Date.now() + 28000, expired: false, browserCalls: 0 };
+  ctx.__playbackBudget = budget;
+  let timer;
+  try {
+    const timeout = new Promise(function (_, reject) {
+      timer = setTimeout(function () { budget.expired = true; reject(new Error('播放解析超时；stage=total-deadline；请稍后重试')); }, 28000);
+    });
+    return await Promise.race([Promise.resolve().then(function () { return operation(ctx); }), timeout]);
+  } finally { clearTimeout(timer); budget.expired = true; }
+}
+
+function remainingPlaybackSeconds(ctx, limit) {
+  const budget = ctx && ctx.__playbackBudget;
+  if (!budget) return limit;
+  const remaining = (budget.endAt - Date.now()) / 1000;
+  if (budget.expired || remaining <= 0) throw new Error('播放解析超时；stage=total-deadline');
+  return Math.max(0.1, Math.min(limit, remaining));
+}
+
+function playbackBrowserSeconds(ctx, limit, maxCalls) {
+  const timeout = remainingPlaybackSeconds(ctx, limit);
+  const budget = ctx && ctx.__playbackBudget;
+  if (budget && budget.browserCalls >= maxCalls) throw new Error('浏览器回退次数已用完；stage=browser-fallback-limit');
+  if (budget) budget.browserCalls++;
+  return timeout;
+}
+
+async function resolvePlayback(input) {
+  return withPlaybackBudget(input, resolvePlaybackWithinBudget);
+}

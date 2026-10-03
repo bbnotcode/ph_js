@@ -301,9 +301,9 @@ var WidgetMetadata = {
   id: "baiplay_jable_media_library",
   title: "Jable",
   description: "Jable custom media library source for baiPlay",
-  author: "baiPlay",
+  author: 'Alan huang',
   site: JABLE_BASE_URL,
-  version: "1.0.0",
+  version: "1.0.1",
   requiredVersion: "0.0.2",
   detailCacheDuration: 60,
   modules: [
@@ -427,55 +427,42 @@ async function getHome(ctx = {}) {
   const ext = argsify(ctx);
   const page = normalizePage(ext.page || ext.pg || ext.from || 1);
   const categoryIds = Array.isArray(ext.categoryIds) && ext.categoryIds.length ? ext.categoryIds : JABLE_HOME_CATEGORY_IDS;
-  const sections = [
-    {
-      id: "jable-categories",
-      title: "\u5206\u7c7b",
-      style: "discover.watchProviders",
-      items: categoryShortcutItems(),
-    },
-  ];
+  const sections = [{ id: 'jable-categories', title: '分类', style: 'discover.watchProviders', items: categoryShortcutItems() }];
   let hero = [];
-  let firstError = null;
-
-  for (const categoryId of categoryIds) {
-    const category = findCategory(categoryId);
-    try {
-      const items = await loadPosterWall({
-        categoryId: category.id,
-        page,
-        sort_by: ext.sort_by || ext.sortBy || category.defaultSort,
-      });
-      const mediaItems = items.map((item, index) => toMiniMediaItem(item, index + 1, category)).filter(Boolean);
-      if (!mediaItems.length) continue;
-      if (!hero.length) hero = mediaItems.slice(0, 6);
-      const action = { type: "category", id: category.id, pageId: category.id, title: category.title };
-      sections.push({
-        id: category.id,
-        title: category.title,
-        style: homeSectionStyle(category),
-        contentType: "movie",
-        more: action,
-        moreAction: action,
-        items: mediaItems.slice(0, SOURCE_PAGE_LIMIT),
-      });
-    } catch (error) {
-      if (!firstError) firstError = error;
-      logInfo("Jable home section skipped: " + category.id + " - " + (error && error.message ? error.message : error));
+  for (let index = 0; index < categoryIds.length; index++) {
+    const category = findCategory(categoryIds[index]);
+    const section = jableSectionShell(category);
+    if (index === 0) {
+      try {
+        const rows = await loadPosterWall({ categoryId: category.id, page, sort_by: ext.sort_by || ext.sortBy || category.defaultSort });
+        section.items = rows.map((item, rank) => toMiniMediaItem(item, rank + 1, category)).filter(Boolean).slice(0, SOURCE_PAGE_LIMIT);
+        hero = section.items.slice(0, 6);
+        section.lazy = false;
+      } catch (error) { section.error = errorMessage(error); }
     }
+    sections.push(section);
   }
+  return { pageType: 'home', id: 'jable-home', title: 'Jable', hero, sections };
+}
 
-  if (!hero.length && firstError) {
-    throw firstError;
-  }
+function jableSectionShell(category) {
+  const action = { type: 'category', id: category.id, pageId: category.id, title: category.title };
+  return { id: category.id, title: category.title, style: homeSectionStyle(category), contentType: 'movie', lazy: true,
+    loadAction: { type: 'custom', id: category.id, sectionId: category.id, title: category.title }, more: action, moreAction: action, items: [] };
+}
 
-  const result = {
-    pageType: "home",
-    title: "Jable",
-    sections,
-  };
-  if (hero.length) result.hero = hero;
-  return result;
+async function getHomeSection(ctx = {}) {
+  const ext = argsify(ctx);
+  const id = ext.sectionId || ext.pageId || ext.id || JABLE_HOME_CATEGORY_IDS[0];
+  if (id === 'jable-categories') return { id, title: '分类', style: 'discover.watchProviders', lazy: false, items: categoryShortcutItems() };
+  const category = findCategory(id);
+  const section = jableSectionShell(category);
+  try {
+    const items = await loadPosterWall({ categoryId: category.id, page: 1, sort_by: ext.sort_by || category.defaultSort });
+    section.items = items.map((item, index) => toMiniMediaItem(item, index + 1, category)).filter(Boolean).slice(0, SOURCE_PAGE_LIMIT);
+  } catch (error) { section.error = errorMessage(error); }
+  section.lazy = false;
+  return section;
 }
 
 async function getCategory(ctx = {}) {
@@ -907,7 +894,8 @@ async function matchEpisode(ctx = {}) {
 
 async function getPlayback(input) {
   const ext = argsify(input);
-  if (ext.url || ext.playUrl || ext.videoUrl) {
+  const hasStableItem = !!(ext.itemId || ext.versionId || ext.id);
+  if (!hasStableItem && (ext.url || ext.playUrl || ext.videoUrl)) {
     return playbackFromDirectUrl(ext.url || ext.playUrl || ext.videoUrl, ext);
   }
   const detail = input && input.videoUrl ? input : await getDetail(Object.keys(ext).length ? ext : input);
@@ -939,7 +927,8 @@ async function getResourceVersions(ctx = {}) {
 
 async function resolvePlayback(ctx = {}) {
   const ext = argsify(ctx);
-  if (ext.url || ext.playUrl || ext.videoUrl) {
+  const hasStableItem = !!(ext.itemId || ext.versionId || ext.id);
+  if (!hasStableItem && (ext.url || ext.playUrl || ext.videoUrl)) {
     return playbackFromDirectUrl(ext.url || ext.playUrl || ext.videoUrl, ext);
   }
   const playback = await getPlayback(ext);
@@ -1151,7 +1140,6 @@ function buildMiniResourceGroups(detail) {
             type: "play",
             itemId,
             versionId,
-            url: detail.videoUrl,
             title,
           },
         },
@@ -1672,6 +1660,7 @@ const JableMediaLibrary = {
   init,
   getManifest,
   getHome,
+  getHomeSection,
   getCategory,
   home,
   homeVod,
@@ -1714,6 +1703,7 @@ if (typeof globalThis !== "undefined") {
   globalThis.init = init;
   globalThis.getManifest = getManifest;
   globalThis.getHome = getHome;
+  globalThis.getHomeSection = getHomeSection;
   globalThis.getCategory = getCategory;
   globalThis.getResourceVersions = getResourceVersions;
   globalThis.resolvePlayback = resolvePlayback;

@@ -811,7 +811,6 @@ const BASE_URL = 'https://www.xvideos.com';
 const widgetAPI = new WidgetAPI(async ()=>{
     try {
         const sessionToken = await getStorageItem('xvideos.session_token');
-        console.log('sessionToken', sessionToken);
         return {
             headers: {
                 Cookie: `session_token=${sessionToken}`
@@ -826,7 +825,7 @@ WidgetMetadata = {
     id: 'xvideos_int',
     title: 'XVideos',
     description: '網路收集到的模塊',
-    version: "0.9.6",
+    version: "0.9.7",
     requiredVersion: '0.0.1',
     author: "網路",
     site: 'https://github.com/baranwang/forward-widget',

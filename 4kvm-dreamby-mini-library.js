@@ -169,7 +169,7 @@ function kvmHomeGroupItems(html, id) {
 }
 
 function getManifest() {
-  return { id: '4kvm-dreamby', name: '4K影视', title: '4K影视', version: '1.10.0', author: 'Alan huang', logo: KVM_LOGO,
+  return { id: '4kvm-dreamby', name: '4K影视', title: '4K影视', version: '1.10.1', author: 'Alan huang', logo: KVM_LOGO,
     capabilities: { search: true, aggregation: true, playbackHistory: true }, aggregation: { search: true, playbackHistory: true } };
 }
 const WidgetMetadata = getManifest();
@@ -225,8 +225,8 @@ function kvmHas4K(html) {
   return /(?:^|\s)4k\s*(?:加入片单|评分|收藏)/i.test(text) || /(?:badge|tag)[^>]*>\s*4k\s*</i.test(html);
 }
 function kvmVersions(id) {
-  return [{ id: 'public-1080', name: '1080P 超清', subtitle: '默认线路；解析时请稍候', default: true,
-    action: { type: 'play', itemId: id, versionId: 'public-1080', qualityId: '1080' } }];
+  return [{ id: 'public-1080', name: '自动画质', subtitle: '播放时解析实际可用线路', default: true,
+    action: { type: 'play', itemId: id, versionId: 'public-1080' } }];
 }
 async function getDetail(input) {
   const id = kvmText(kvmPick(input, ['itemId', 'id', 'episodeId'], '')); if (!id) throw new Error('4K影视详情：缺少内容 ID');
@@ -277,13 +277,17 @@ async function resolvePlayback(input) {
   try {
     result = await Widget.browser.fetch(page, { visible: false, timeout: 15, timeoutSeconds: 15, waitAfterLoad: 2.5, waitForAny: true, captureRequests: true, headers: KVM_HEADERS });
   } catch (error) {
-    throw new Error('4K影视播放：1080P 浏览器解析失败；stage=browser-fetch；reason=' + kvmText(error && error.message || error));
+    throw new Error('4K影视播放：浏览器解析失败；stage=browser-fetch；reason=' + kvmText(error && error.message || error));
   }
   const qualities = kvmQualityCandidates(result); const media = kvmMediaCandidates(result);
-  const playable = qualities.filter(q => !q.locked && /\.m3u8|\.mp4/i.test(q.url));
+  const excluded = new Set(qualities.filter(q => q.locked).map(q => q.url));
+  const isMain = url => !excluded.has(url) && !/(?:^|[\/_.-])(?:ads?|advert(?:isement)?|preroll|trailer|preview)(?:[\/_.-]|$)/i.test(url);
+  const playable = qualities.filter(q => !q.locked && /\.m3u8|\.mp4/i.test(q.url) && isMain(q.url));
   const real1080 = playable.find(q => /1080|超清/i.test(q.title));
-  const media1080 = media.find(url => /1080(?:p)?(?:[^0-9]|$)/i.test(url));
-  const url = real1080 && real1080.url || media1080 || media[media.length - 1] || media[0];
+  const validMedia = media.filter(isMain);
+  const media1080 = validMedia.find(url => /1080(?:p)?(?:[^0-9]|$)/i.test(url));
+  const url = real1080 && real1080.url || media1080 || (playable.length === 1 ? playable[0].url : '') || (validMedia.length === 1 ? validMedia[0] : '');
+  if (!url && validMedia.length > 1) throw new Error('4K影视播放：捕获到多个未明确归属的媒体地址，请重试；stage=media-selection');
   if (!url) { const keys = result && typeof result === 'object' ? Object.keys(result).join(',') : typeof result; throw new Error('4K影视播放：浏览器未返回最终媒体地址；stage=media-capture；page=' + page + '；resultKeys=' + keys + '；mediaCandidates=0；blobOnly=true'); }
   const hls = /\.m3u8(?:[?#]|$)/i.test(url);
   // This source's HLS playlist and its segments live on different CDNs. The

@@ -1,0 +1,636 @@
+{
+  "123av-mini-library.js": {
+    "id": "123av-mini-library",
+    "parameters": [
+      "baseUrl",
+      "surritBaseUrl"
+    ],
+    "entryPoints": [
+      "getManifest",
+      "getHome",
+      "getHomeSection",
+      "getCategory",
+      "getDetail",
+      "getResourceVersions",
+      "resolvePlayback",
+      "search"
+    ]
+  },
+  "1808-mini-library.js": {
+    "id": "1808-online",
+    "parameters": [
+      "baseURL"
+    ],
+    "entryPoints": [
+      "getManifest",
+      "getHome",
+      "getHomeSection",
+      "getCategory",
+      "getDetail",
+      "getResourceVersions",
+      "resolvePlayback"
+    ]
+  },
+  "4kvm-dreamby-mini-library.js": {
+    "id": "4kvm-dreamby",
+    "parameters": [],
+    "entryPoints": [
+      "getManifest",
+      "getHome",
+      "getHomeSection",
+      "getCategory",
+      "getDetail",
+      "getResourceVersions",
+      "resolvePlayback",
+      "search"
+    ]
+  },
+  "591av-mini-library.js": {
+    "id": "591av-mini-library",
+    "parameters": [
+      "baseUrl"
+    ],
+    "entryPoints": [
+      "getManifest",
+      "getHome",
+      "getHomeSection",
+      "getCategory",
+      "getDetail",
+      "getResourceVersions",
+      "resolvePlayback",
+      "search"
+    ]
+  },
+  "asmrlib-mini-library.js": {
+    "id": "asmrlib",
+    "parameters": [],
+    "entryPoints": [
+      "getManifest",
+      "getHome",
+      "getHomeSection",
+      "getCategory",
+      "getDetail",
+      "getResourceVersions",
+      "resolvePlayback",
+      "search"
+    ]
+  },
+  "bad-news-mini-library.js": {
+    "id": "bad-news-media",
+    "parameters": [],
+    "entryPoints": [
+      "getManifest",
+      "getHome",
+      "getHomeSection",
+      "getCategory",
+      "getDetail",
+      "getResourceVersions",
+      "resolvePlayback",
+      "search"
+    ]
+  },
+  "eporner-mini-library 2.js": {
+    "id": "eporner-mini-library",
+    "parameters": [],
+    "entryPoints": [
+      "getManifest",
+      "getHome",
+      "getHomeSection",
+      "getCategory",
+      "getDetail",
+      "getResourceVersions",
+      "resolvePlayback",
+      "search"
+    ]
+  },
+  "eporner-mini-library.js": {
+    "id": "eporner-mini-library",
+    "parameters": [],
+    "entryPoints": [
+      "getManifest",
+      "getHome",
+      "getHomeSection",
+      "getCategory",
+      "getDetail",
+      "getResourceVersions",
+      "resolvePlayback",
+      "search"
+    ]
+  },
+  "forward.stripchat.dreamby-mini-library.js": {
+    "id": "forward.stripchat",
+    "parameters": [
+      "cookie"
+    ],
+    "entryPoints": [
+      "getManifest",
+      "getHome",
+      "getHomeSection",
+      "getCategory",
+      "getDetail",
+      "getResourceVersions",
+      "resolvePlayback"
+    ]
+  },
+  "girigirilove-mini-library.js": {
+    "id": "girigirilove-mini-library",
+    "parameters": [
+      "baseURL",
+      "cacheMinutes"
+    ],
+    "entryPoints": [
+      "getManifest",
+      "getHome",
+      "getHomeSection",
+      "getCategory",
+      "getDetail",
+      "getResourceVersions",
+      "resolvePlayback",
+      "search",
+      "matchResources"
+    ]
+  },
+  "hanime1-mini-library.js": {
+    "id": "hanime1-mini-library",
+    "parameters": [
+      "baseUrl"
+    ],
+    "entryPoints": [
+      "getManifest",
+      "getHome",
+      "getHomeSection",
+      "getCategory",
+      "getDetail",
+      "getResourceVersions",
+      "resolvePlayback",
+      "search"
+    ]
+  },
+  "hsex-mini-library.js": {
+    "id": "hsex-mini-library",
+    "parameters": [
+      "baseUrl"
+    ],
+    "entryPoints": [
+      "getManifest",
+      "getHome",
+      "getHomeSection",
+      "getCategory",
+      "getDetail",
+      "getResourceVersions",
+      "resolvePlayback",
+      "search"
+    ]
+  },
+  "jable.media-library.js": {
+    "id": "baiplay_jable_media_library",
+    "parameters": [],
+    "entryPoints": [
+      "getManifest",
+      "getHome",
+      "getCategory",
+      "getDetail",
+      "getResourceVersions",
+      "resolvePlayback",
+      "search",
+      "matchResources"
+    ]
+  },
+  "javgg-mini-library.js": {
+    "id": "javgg-mini-library",
+    "parameters": [
+      "baseUrl"
+    ],
+    "entryPoints": [
+      "getManifest",
+      "getHome",
+      "getHomeSection",
+      "getCategory",
+      "getDetail",
+      "getResourceVersions",
+      "resolvePlayback",
+      "search"
+    ]
+  },
+  "kbjfan-mini-library.js": {
+    "id": "kbjfan-mini-library",
+    "parameters": [
+      "baseURL"
+    ],
+    "entryPoints": [
+      "getManifest",
+      "getHome",
+      "getHomeSection",
+      "getCategory",
+      "getDetail",
+      "getResourceVersions",
+      "resolvePlayback",
+      "search"
+    ]
+  },
+  "madou8-domestic-mini-library.js": {
+    "id": "madou8-domestic-mini-library",
+    "parameters": [
+      "baseUrl"
+    ],
+    "entryPoints": [
+      "getManifest",
+      "getHome",
+      "getHomeSection",
+      "getCategory",
+      "getDetail",
+      "getResourceVersions",
+      "resolvePlayback",
+      "search"
+    ]
+  },
+  "madou8-mini-library 5.js": {
+    "id": "madou8-mini-library",
+    "parameters": [
+      "baseUrl"
+    ],
+    "entryPoints": [
+      "getManifest",
+      "getHome",
+      "getHomeSection",
+      "getCategory",
+      "getDetail",
+      "getResourceVersions",
+      "resolvePlayback",
+      "search"
+    ]
+  },
+  "manko-fun-mini-library.js": {
+    "id": "manko-fun",
+    "parameters": [],
+    "entryPoints": [
+      "getManifest",
+      "getHome",
+      "getHomeSection",
+      "getCategory",
+      "getDetail",
+      "getResourceVersions",
+      "resolvePlayback",
+      "search"
+    ]
+  },
+  "missav-mini-library-CloudFlare.js": {
+    "id": "missav-mini-library",
+    "parameters": [
+      "baseURL",
+      "entryPath",
+      "backupBaseURLs",
+      "enableBrowserFallback",
+      "browserVisible",
+      "requestTimeoutSeconds",
+      "cacheMinutes"
+    ],
+    "entryPoints": [
+      "getManifest",
+      "getHome",
+      "getHomeSection",
+      "getCategory",
+      "getDetail",
+      "getResourceVersions",
+      "resolvePlayback",
+      "search",
+      "matchResources"
+    ]
+  },
+  "missav-mini-library-download-working 6.js": {
+    "id": "missav-mini-library",
+    "parameters": [
+      "baseURL",
+      "entryPath",
+      "backupBaseURLs",
+      "enableBrowserFallback",
+      "browserVisible",
+      "automaticBrowserFallback",
+      "verificationCooldownMinutes",
+      "requestTimeoutSeconds",
+      "cacheMinutes",
+      "categoryRestoreMinutes"
+    ],
+    "entryPoints": [
+      "getManifest",
+      "getHome",
+      "getHomeSection",
+      "getCategory",
+      "getDetail",
+      "getResourceVersions",
+      "resolvePlayback",
+      "search",
+      "matchResources"
+    ]
+  },
+  "missav-mini-library-download-working.js": {
+    "id": "missav-mini-library",
+    "parameters": [
+      "baseURL",
+      "entryPath",
+      "backupBaseURLs",
+      "enableBrowserFallback",
+      "browserVisible",
+      "automaticBrowserFallback",
+      "verificationCooldownMinutes",
+      "requestTimeoutSeconds",
+      "cacheMinutes",
+      "categoryRestoreMinutes"
+    ],
+    "entryPoints": [
+      "getManifest",
+      "getHome",
+      "getHomeSection",
+      "getCategory",
+      "getDetail",
+      "getResourceVersions",
+      "resolvePlayback",
+      "search",
+      "matchResources"
+    ]
+  },
+  "missav-mini-library.js": {
+    "id": "missav-mini-library",
+    "parameters": [
+      "baseURL",
+      "entryPath"
+    ],
+    "entryPoints": [
+      "getManifest",
+      "getHome",
+      "getHomeSection",
+      "getCategory",
+      "getDetail",
+      "getResourceVersions",
+      "resolvePlayback",
+      "search",
+      "matchResources"
+    ]
+  },
+  "novipnoad-mini-library.js": {
+    "id": "novipnoad",
+    "parameters": [],
+    "entryPoints": [
+      "getManifest",
+      "getHome",
+      "getCategory",
+      "getDetail",
+      "getResourceVersions",
+      "resolvePlayback",
+      "search",
+      "matchResources"
+    ]
+  },
+  "olevod-mini-library.js": {
+    "id": "baiplay_olevod_media_library",
+    "parameters": [],
+    "entryPoints": [
+      "getManifest",
+      "getHome",
+      "getHomeSection",
+      "getCategory",
+      "getDetail",
+      "getResourceVersions",
+      "resolvePlayback",
+      "search"
+    ]
+  },
+  "pb365-mini-library.js": {
+    "id": "pb365-mini-library",
+    "parameters": [
+      "baseUrl"
+    ],
+    "entryPoints": [
+      "getManifest",
+      "getHome",
+      "getHomeSection",
+      "getCategory",
+      "getDetail",
+      "getResourceVersions",
+      "resolvePlayback",
+      "search"
+    ]
+  },
+  "pektino-mini-library 3.js": {
+    "id": "pektino-twitter-video",
+    "parameters": [
+      "baseURL",
+      "cookie"
+    ],
+    "entryPoints": [
+      "getManifest",
+      "getHome",
+      "getHomeSection",
+      "getCategory",
+      "getDetail",
+      "getResourceVersions",
+      "resolvePlayback"
+    ]
+  },
+  "pimpbunny-mini-library.js": {
+    "id": "pimpbunny-mini-library",
+    "parameters": [
+      "baseURL"
+    ],
+    "entryPoints": [
+      "getManifest",
+      "getHome",
+      "getHomeSection",
+      "getCategory",
+      "getDetail",
+      "getResourceVersions",
+      "resolvePlayback",
+      "search"
+    ]
+  },
+  "pornhub.media-library.js": {
+    "id": "baiplay_pornhub_media_library",
+    "parameters": [],
+    "entryPoints": [
+      "getManifest",
+      "getHome",
+      "getCategory",
+      "getDetail",
+      "getResourceVersions",
+      "resolvePlayback",
+      "search",
+      "matchResources"
+    ]
+  },
+  "rou666-mini-library.js": {
+    "id": "rou666-mini-library",
+    "parameters": [
+      "baseUrl",
+      "proxyBaseUrl"
+    ],
+    "entryPoints": [
+      "getManifest",
+      "getHome",
+      "getHomeSection",
+      "getCategory",
+      "getDetail",
+      "getResourceVersions",
+      "resolvePlayback",
+      "search"
+    ]
+  },
+  "sexbjcam-mini-library.js": {
+    "id": "sexbjcam-mini-library",
+    "parameters": [
+      "baseURL"
+    ],
+    "entryPoints": [
+      "getManifest",
+      "getHome",
+      "getHomeSection",
+      "getCategory",
+      "getDetail",
+      "getResourceVersions",
+      "resolvePlayback",
+      "search"
+    ]
+  },
+  "spankbang-mini-library.js": {
+    "id": "spankbang-dreamby",
+    "parameters": [
+      "baseUrl",
+      "visibleVerification"
+    ],
+    "entryPoints": [
+      "getManifest",
+      "getHome",
+      "getHomeSection",
+      "getCategory",
+      "getDetail",
+      "getResourceVersions",
+      "resolvePlayback",
+      "search"
+    ]
+  },
+  "superporn-mini-library.js": {
+    "id": "superporn-mini-library",
+    "parameters": [
+      "baseUrl"
+    ],
+    "entryPoints": [
+      "getManifest",
+      "getHome",
+      "getHomeSection",
+      "getCategory",
+      "getDetail",
+      "getResourceVersions",
+      "resolvePlayback",
+      "search"
+    ]
+  },
+  "taolusm-mini-library.js": {
+    "id": "taolusm-mini-library",
+    "parameters": [
+      "baseURL"
+    ],
+    "entryPoints": [
+      "getManifest",
+      "getHome",
+      "getHomeSection",
+      "getCategory",
+      "getDetail",
+      "getResourceVersions",
+      "resolvePlayback",
+      "search"
+    ]
+  },
+  "ttdm-mini-library (1).js": {
+    "id": "ttdm-mini-library",
+    "parameters": [
+      "baseUrl"
+    ],
+    "entryPoints": [
+      "getManifest",
+      "getHome",
+      "getHomeSection",
+      "getCategory",
+      "getDetail",
+      "getResourceVersions",
+      "resolvePlayback",
+      "search"
+    ]
+  },
+  "twiidol-mini-library.js": {
+    "id": "twiidol-twitter-video",
+    "parameters": [],
+    "entryPoints": [
+      "getManifest",
+      "getHome",
+      "getHomeSection",
+      "getCategory",
+      "getDetail",
+      "getResourceVersions",
+      "resolvePlayback",
+      "search"
+    ]
+  },
+  "xiaohuangniao-mini-library.js": {
+    "id": "xiaohuangniao-mini-library",
+    "parameters": [
+      "baseUrl"
+    ],
+    "entryPoints": [
+      "getManifest",
+      "getHome",
+      "getHomeSection",
+      "getCategory",
+      "getDetail",
+      "getResourceVersions",
+      "resolvePlayback",
+      "search"
+    ]
+  },
+  "xxxfollow-mini-library 5.js": {
+    "id": "xxxfollow-mini-library",
+    "parameters": [
+      "baseURL"
+    ],
+    "entryPoints": [
+      "getManifest",
+      "getHome",
+      "getHomeSection",
+      "getCategory",
+      "getDetail",
+      "getResourceVersions",
+      "resolvePlayback",
+      "search"
+    ]
+  },
+  "xxxfollow-mini-library.js": {
+    "id": "xxxfollow-mini-library",
+    "parameters": [
+      "baseURL"
+    ],
+    "entryPoints": [
+      "getManifest",
+      "getHome",
+      "getHomeSection",
+      "getCategory",
+      "getDetail",
+      "getResourceVersions",
+      "resolvePlayback",
+      "search"
+    ]
+  },
+  "yesporn-mini-library.js": {
+    "id": "yesporn-mini-library",
+    "parameters": [
+      "baseURL"
+    ],
+    "entryPoints": [
+      "getManifest",
+      "getHome",
+      "getHomeSection",
+      "getCategory",
+      "getDetail",
+      "getResourceVersions",
+      "resolvePlayback",
+      "search"
+    ]
+  }
+}

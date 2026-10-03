@@ -9,8 +9,8 @@ const WidgetMetadata = {
   id: 'girigirilove-mini-library',
   name: '爱动漫',
   title: '爱动漫',
-  version: '1.0.0',
-  author: 'EL / Codex',
+  version: '1.0.1',
+  author: 'Alan huang',
   logo: GIRI_ICON,
   icon: GIRI_ICON,
   site: GIRI_DEFAULT_SITE,
@@ -77,6 +77,7 @@ function getManifest() {
 }
 
 async function getHome(ctx) {
+  ctx = normalizeRuntimeContext(ctx);
   const sections = GIRI_CATEGORIES.map(function (category) {
     return {
       id: category.id,
@@ -99,6 +100,7 @@ async function getHome(ctx) {
 }
 
 async function getHomeSection(ctx) {
+  ctx = normalizeRuntimeContext(ctx);
   const section = findCategory(ctx && (ctx.sectionId || ctx.id)) || GIRI_CATEGORIES[0];
   try {
     const page = await fetchCategoryPage(ctx, section, 1, 'latest');
@@ -116,6 +118,7 @@ async function getHomeSection(ctx) {
 }
 
 async function getCategory(ctx) {
+  ctx = normalizeRuntimeContext(ctx);
   const page = positiveInt(contextValue(ctx, 'page'), 1);
   const pageId = stringValue(ctx && (ctx.pageId || ctx.id)) || 'latest';
   const section = findCategory(pageId) || GIRI_CATEGORIES[0];
@@ -136,6 +139,7 @@ async function getCategory(ctx) {
 }
 
 async function getDetail(ctx) {
+  ctx = normalizeRuntimeContext(ctx);
   const payload = decodePayload(ctx && (ctx.itemId || ctx.id || ctx.sourceId));
   const id = firstNonEmpty(payload && payload.id, ctx && ctx.itemId, ctx && ctx.id);
   if (!id) throw new Error('爱动漫详情参数无效');
@@ -163,7 +167,8 @@ async function getDetail(ctx) {
         sourceName: '爱动漫',
         action: {
           type: 'play',
-          itemId: versionId,
+          itemId: encodePayload({ id: id, title: detail.title, poster: detail.poster }),
+          episodeId: versionId,
           versionId: versionId,
           url: episodePageURL,
           title: episode.title
@@ -176,7 +181,7 @@ async function getDetail(ctx) {
     pageType: 'detail',
     id: encodePayload({ id: id, title: detail.title, poster: detail.poster }),
     title: detail.title,
-    type: detail.episodes.length > 1 ? 'series' : 'movie',
+    type: detail.isSeries ? 'series' : 'movie',
     poster: detail.poster,
     backdrop: detail.poster,
     detailImageAspectRatio: '2:3',
@@ -186,7 +191,7 @@ async function getDetail(ctx) {
     overview: detail.overview,
     rating: detail.rating,
     remarks: detail.remarks,
-    seasons: detail.episodes.length ? [{
+    seasons: detail.isSeries && detail.episodes.length ? [{
       id: 'season-1',
       title: '播放列表',
       seasonNumber: 1,
@@ -199,7 +204,7 @@ async function getDetail(ctx) {
           episodeNumber: index + 1,
           action: {
             type: 'play',
-            itemId: episodeId,
+            itemId: encodePayload({ id: id, title: detail.title, poster: detail.poster }),
             episodeId: episodeId,
             versionId: episodeId,
             url: episodePageURL,
@@ -223,7 +228,11 @@ async function getDetail(ctx) {
 }
 
 async function getResourceVersions(ctx) {
-  const payload = decodePayload(ctx && (ctx.itemId || ctx.id || ctx.versionId || ctx.episodeId));
+  ctx = normalizeRuntimeContext(ctx);
+  const selected = firstNonEmpty(ctx && ctx.episodeId, ctx && ctx.versionId);
+  const selectedPayload = decodePayload(selected);
+  const selectedId = firstNonEmpty(selectedPayload && selectedPayload.id, selected);
+  const payload = decodePayload(isPlayId(selectedId) ? selected : ctx && (ctx.itemId || ctx.id));
   const id = firstNonEmpty(payload && payload.id, ctx && ctx.itemId, ctx && ctx.id);
   if (!id) return [];
   if (isPlayId(id)) {
@@ -250,6 +259,7 @@ async function getResourceVersions(ctx) {
 }
 
 async function resolvePlayback(ctx) {
+  ctx = normalizeRuntimeContext(ctx);
   const direct = firstPlayable(ctx && ctx.playUrl, ctx && ctx.videoUrl, ctx && ctx.mediaUrl, ctx && ctx.src);
   const resolved = direct ? { url: direct, referer: ctx && ctx.referer } : await resolveFirstPlayable(ctx);
   const url = resolved && resolved.url;
@@ -342,6 +352,7 @@ async function play(flagOrInput, id) {
 }
 
 async function search(ctx) {
+  ctx = normalizeRuntimeContext(ctx);
   const query = stringValue(ctx && (ctx.query || ctx.keyword || ctx.text));
   const page = positiveInt(contextValue(ctx, 'page'), 1);
   if (!query) return { pageType: 'search', title: '搜索结果', items: [], page: page, hasMore: false };
@@ -366,6 +377,7 @@ async function getSearch(ctx) {
 }
 
 async function matchResources(ctx) {
+  ctx = normalizeRuntimeContext(ctx);
   const query = stringValue(ctx && (ctx.title || ctx.name || ctx.query || ctx.keyword));
   if (!query) return { results: [] };
   const results = await search({ query: query, params: ctx && ctx.params, config: ctx && ctx.config });
@@ -398,7 +410,9 @@ async function fetchText(ctx, url) {
   if (cached) return cached;
   const response = await httpGet(url, { headers: requestHeaders(ctx, url) });
   const text = responseText(response);
-  if (!text) throw new Error('空响应');
+  const status = Number(response && (response.status || response.statusCode)) || 200;
+  if (status >= 400) throw new Error('爱动漫源站 HTTP ' + status);
+  if (!text || /Just a moment|cf-mitigated|Cloudflare Ray ID|<title>\s*(?:Service Unavailable|Bad Gateway|Error)/i.test(text)) throw new Error('空响应、错误页或浏览器验证页');
   setCached(ctx, url, text);
   return text;
 }
@@ -436,10 +450,11 @@ function parseCards(ctx, html) {
   const items = [];
   const seen = {};
   const source = String(html || '');
-  const pattern = /<a\b([^>]*class=["'][^"']*public-list-exp[^"']*["'][^>]*)>([\s\S]*?)<\/a>/gi;
+  const pattern = /<a\b((?:[^>"']|"[^"]*"|'[^']*')*)>([\s\S]*?)<\/a>/gi;
   let match;
   while ((match = pattern.exec(source))) {
     const attrs = match[1] || '';
+    if (!/\bpublic-list-exp\b/.test(attr(attrs, 'class'))) continue;
     const block = match[0];
     const href = attr(attrs, 'href');
     const title = cleanText(attr(attrs, 'title') || firstMatch(block, /alt=["']([^"']+)["']/i));
@@ -498,7 +513,7 @@ function parseDetail(ctx, html, id) {
   const remarks = cleanText(firstMatch(source, /<[^>]*class=["'][^"']*slide-info-remarks[^"']*["'][^>]*>([\s\S]*?)<\/[^>]+>/i));
   const rating = numericRating(cleanText(firstMatch(source, /<div[^>]*class=["'][^"']*fraction[^"']*["'][^>]*>([\s\S]*?)<\/div>/i)));
   const group = bestEpisodeGroup(source);
-  const episodes = parseEpisodes(group || source);
+  const episodes = parseEpisodes(group);
   const related = parseRelated(ctx, source);
   return {
     title: title,
@@ -507,46 +522,31 @@ function parseDetail(ctx, html, id) {
     remarks: remarks,
     rating: rating,
     episodes: episodes,
+    isSeries: /(?:更新至|全)\s*\d+\s*集|连载|TV动画|电视剧/.test(remarks) || episodes.length > 1,
     related: related
   };
 }
 
 function bestEpisodeGroup(html) {
   const source = String(html || '');
-  const listIndex = source.indexOf('anthology-list top20');
-  const tabSource = listIndex > 0 ? source.slice(Math.max(0, source.lastIndexOf('anthology-tab', listIndex) - 300), listIndex) : source;
-  const listSource = listIndex > 0 ? source.slice(listIndex) : source;
-  const groupPattern = /<div\b[^>]*class=["'][^"']*anthology-list-box[^"']*["'][^>]*>([\s\S]*?)(?=<div\b[^>]*class=["'][^"']*anthology-list-box|<\/div>\s*<\/div>\s*<script|$)/gi;
-  const groups = [];
-  let match;
-  while ((match = groupPattern.exec(listSource))) groups.push(match[1]);
+  const groups = giriElementBlocks(source, 'anthology-list-box');
   if (!groups.length) return '';
-  const tabPattern = /<a\b[^>]*class=["'][^"']*swiper-slide[^"']*["'][^>]*>([\s\S]*?)<\/a>/gi;
-  const tabs = [];
-  while ((match = tabPattern.exec(tabSource))) tabs.push(cleanText(match[1]));
-  for (let index = 0; index < tabs.length; index += 1) {
-    if (tabs[index].indexOf('简中') >= 0 && groups[index]) return groups[index];
-  }
-  for (let index = 0; index < groups.length; index += 1) {
-    if (/\/play[^"']+-2-\d+\/?/i.test(groups[index])) return groups[index];
-  }
-  return groups[0];
+  const tabs = []; const pattern = /<a\b((?:[^>"']|"[^"]*"|'[^']*')*)>([\s\S]*?)<\/a>/gi; let match;
+  const tabBlock = giriElementBlocks(source, 'anthology-tab').join('');
+  while ((match = pattern.exec(tabBlock))) if (/\bswiper-slide\b/.test(attr(match[1], 'class'))) tabs.push(cleanText(match[2]));
+  for (let index = 0; index < tabs.length; index++) if (tabs[index].indexOf('简中') >= 0 && groups[index]) return groups[index];
+  return groups.find(group => /\/play[^"']+-2-\d+\/?/i.test(group)) || groups[0];
 }
 
 function parseEpisodes(html) {
-  const episodes = [];
-  const pattern = /<a\b([^>]*href=["'][^"']*\/(?:play\/|play[^\/"']+)[^"']*["'][^>]*)>([\s\S]*?)<\/a>/gi;
+  const episodes = []; const seen = {};
+  const pattern = /<a\b((?:[^>"']|"[^"]*"|'[^']*')*)>([\s\S]*?)<\/a>/gi;
   let match;
   while ((match = pattern.exec(String(html || '')))) {
-    const href = attr(match[1], 'href');
-    const id = cleanId(href);
-    const raw = cleanText(match[2]);
-    if (!id || !raw) continue;
-    const epNum = Number(raw);
-    episodes.push({
-      id: id,
-      title: /^\d+$/.test(raw) && epNum <= 100 ? '第' + epNum + '集' : raw
-    });
+    const id = cleanId(attr(match[1], 'href')); const raw = cleanText(match[2]);
+    if (!id || !isPlayId(id) || !raw || seen[id]) continue;
+    seen[id] = true;
+    episodes.push({ id, title: /^\d+$/.test(raw) && Number(raw) <= 100 ? '第' + Number(raw) + '集' : raw });
   }
   return episodes;
 }
@@ -942,4 +942,35 @@ if (typeof globalThis !== 'undefined') {
 
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = GirigiriLoveMiniLibrary;
+}
+
+function normalizeRuntimeContext(input) {
+  let ctx = input;
+  if (typeof ctx === 'string') { try { ctx = JSON.parse(ctx); } catch (_) { ctx = {}; } }
+  if (!ctx || typeof ctx !== 'object' || Array.isArray(ctx)) return {};
+  const nested = {};
+  ['params', 'config', 'settings', 'parameters', 'pagination', 'pageInfo'].forEach(function (key) {
+    let bag = ctx[key];
+    if (typeof bag === 'string') { try { bag = JSON.parse(bag); } catch (_) { bag = null; } }
+    if (bag && typeof bag === 'object' && !Array.isArray(bag)) Object.keys(bag).forEach(function (name) { if (nested[name] === undefined) nested[name] = bag[name]; });
+  });
+  return Object.assign(nested, ctx);
+}
+
+function giriElementBlocks(html, className) {
+  const source = String(html || ''); const blocks = [];
+  const opening = /<([a-z][a-z0-9-]*)\b((?:[^>"']|"[^"]*"|'[^']*')*)>/gi;
+  let match;
+  while ((match = opening.exec(source))) {
+    if ((' ' + attr(match[2], 'class') + ' ').indexOf(' ' + className + ' ') < 0) continue;
+    const name = match[1].toLowerCase(); const start = opening.lastIndex;
+    const tags = /<\/?([a-z][a-z0-9-]*)\b((?:[^>"']|"[^"]*"|'[^']*')*)>/gi;
+    tags.lastIndex = start; let depth = 1; let tag;
+    while ((tag = tags.exec(source))) {
+      if (tag[1].toLowerCase() !== name) continue;
+      if (tag[0][1] === '/') depth--; else if (!/\/\s*>$/.test(tag[0])) depth++;
+      if (!depth) { blocks.push(source.slice(start, tag.index)); opening.lastIndex = tags.lastIndex; break; }
+    }
+  }
+  return blocks;
 }

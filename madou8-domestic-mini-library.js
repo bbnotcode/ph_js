@@ -8,7 +8,7 @@ const WidgetMetadata = {
   id: 'madou8-domestic-mini-library',
   name: '麻豆视频·国产',
   title: '麻豆视频·国产',
-  version: '1.2.1',
+  version: '1.2.2',
   requiredVersion: '0.0.1',
   author: 'Alan huang',
   site: MADOU8_DEFAULT_BASE,
@@ -176,7 +176,6 @@ async function discoverVariants(ctx, playlist, detailUrl) {
       const variants = parseMaster(body, url);
       if (variants.length) {
         discovered.push.apply(discovered, variants.slice(0, 6));
-        break;
       } else if (/#EXTINF/i.test(body)) {
         const inferred = inferQuality(url);
         if (inferred) discovered.push(inferred);
@@ -188,6 +187,7 @@ async function discoverVariants(ctx, playlist, detailUrl) {
 
 async function chooseStream(ctx, playlist, requestedHeight, detailUrl) {
   let fallback = null;
+  function remember(candidate) { if (!fallback || (candidate.height || 0) > (fallback.height || 0)) fallback = candidate; }
   for (let i = 0; i < Math.min(playlist.length, 4); i++) {
     const item = playlist[i];
     if (!item || !/^https?:\/\//i.test(String(item.url || ''))) continue;
@@ -197,19 +197,18 @@ async function chooseStream(ctx, playlist, requestedHeight, detailUrl) {
       if (!variants.length) {
         if (!/#EXTINF/i.test(body)) continue;
         const inferred = inferQuality(item.url) || { url: item.url, height: 0 };
-        inferred.url = item.url;
-        if (!fallback) fallback = inferred;
-        if (!requestedHeight || inferred.height === requestedHeight) return inferred;
+        inferred.url = item.url; remember(inferred);
+        if (requestedHeight && inferred.height === requestedHeight) return inferred;
       } else {
         const ordered = requestedHeight
-          ? variants.filter(function (x) { return x.height === requestedHeight; }).concat(variants.filter(function (x) { return x.height !== requestedHeight; }))
-          : variants;
+          ? variants.filter(function (x) { return x.height === requestedHeight; }).concat(variants.filter(function (x) { return x.height !== requestedHeight; })) : variants;
         for (let j = 0; j < ordered.length; j++) {
+          if (!requestedHeight && fallback && ordered[j].height <= fallback.height) continue;
           try {
-            const mediaBody = await fetchHlsText(ctx, ordered[j].url, detailUrl);
-            if (!/#EXTINF/i.test(mediaBody)) continue;
-            if (!fallback) fallback = ordered[j];
-            return ordered[j];
+            if (!/#EXTINF/i.test(await fetchHlsText(ctx, ordered[j].url, detailUrl))) continue;
+            remember(ordered[j]);
+            if (requestedHeight && ordered[j].height === requestedHeight) return ordered[j];
+            break;
           } catch (_) {}
         }
       }

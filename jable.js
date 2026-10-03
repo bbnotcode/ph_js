@@ -5,7 +5,7 @@ WidgetMetadata = {
   description: "修复声音&恢复大量分类",
   author: "nibiru｜MakkaPakka｜蝴蝶",
   site: "https://widgets-xd.vercel.app",
-  version: "1.3.0",
+  version: "1.3.1",
   requiredVersion: "0.0.2",
   detailCacheDuration: 60,
   modules: [
@@ -1165,14 +1165,6 @@ async function search(params = {}) {
   
   let url = `https://jable.tv/search/${keyword}/?mode=async&function=get_block&block_id=list_videos_videos_list_search_result&q=${keyword}`;
   
-  if (params.sort_by) {
-    url += `&sort_by=${params.sort_by}`;
-  }
-  
-  if (params.from) {
-    url += `&from=${params.from}`;
-  }
-  
   return await loadPage({ ...params, url });
 }
 
@@ -1189,10 +1181,10 @@ async function loadPageSections(params = {}) {
       throw new Error("\u5730\u5740\u4e0d\u80fd\u4e3a\u7a7a");
     }
     if (params["sort_by"]) {
-      url += `&sort_by=${params.sort_by}`;
+      url += `&sort_by=${encodeURIComponent(params.sort_by)}`;
     }
     if (params["from"]) {
-      url += `&from=${params.from}`;
+      url += `&from=${encodeURIComponent(params.from)}`;
     }
     const response = await Widget.http.get(url, {
       headers: {
