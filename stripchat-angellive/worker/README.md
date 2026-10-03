@@ -1,6 +1,6 @@
 # stripchat-mouflon-proxy（Cloudflare Worker 版）
 
-云端常驻版的 Mouflon 解密代理。逻辑与 `~/stripchat-mouflon-proxy/proxy.js` 完全一致，
+云端常驻版的 Mouflon 解密代理。采用与本地 Node 版相同的解析、解密流程，
 只是跑在 Cloudflare 边缘，因此**任何设备、任何网络都能用，不需要自己的机器开机**。
 
 线上地址：
@@ -20,6 +20,10 @@ npx wrangler deploy
 
 `~/stripchat-mouflon-proxy/worker/src/index.js` 是实际部署的那份，本目录与它保持一致，
 改动后请同步过去再 deploy。
+
+2026-10-03 的仓库更新加入首个有效 CDN 返回、重试刷新 master/密钥和覆盖清单正文的超时；
+清单/JSON 限 1 MiB，视频分片仍流式传输。新增日志仅记录阶段、耗时和成功状态，traces 按 5% 采样。
+这些改动需要部署到同一个 Worker 后才会影响线上服务；本次脚本修复未执行部署。
 
 ## 路由
 

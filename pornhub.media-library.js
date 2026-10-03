@@ -48,9 +48,9 @@ var WidgetMetadata = {
   id: "baiplay_pornhub_media_library",
   title: "Pornhub",
   description: "Pornhub custom media library source for baiPlay",
-  author: "community",
+  author: 'Alan huang',
   site: PORNHUB_BASE_URL,
-  version: "1.0.0",
+  version: "1.0.1",
   requiredVersion: "0.0.2",
   detailCacheDuration: 60,
 };
@@ -792,10 +792,8 @@ function normalizeQuality(value) {
 }
 
 function sortMediaSources(sources) {
-  return (sources || []).slice().sort((a, b) => {
-    if (!!a.default !== !!b.default) return a.default ? -1 : 1;
-    return (b.quality || 0) - (a.quality || 0);
-  });
+  return (sources || []).slice().sort((a, b) => (b.quality || 0) - (a.quality || 0))
+    .map((source, index) => ({ ...source, default: index === 0 }));
 }
 
 function mergeMediaSources(left, right) {

@@ -74,6 +74,11 @@ async function run() {
 
   const serializedCache = JSON.stringify(Array.from(storageValues.values()));
   assert(!serializedCache.includes('token=fresh'), '不得缓存签名播放 URL');
+
+  networkGood = true;
+  const playback = await library.resolvePlayback({ itemId: detailURL, embedURL, versionId: 'quality:720' });
+  assert(playback.url.includes('/720/index.m3u8'), '播放总时限内仍应完成播放器与签名清单回退并选择 720P');
+  assert.strictEqual(playback.headers.Referer, embedURL, '保持播放器要求的原生请求头');
   console.log('SexBJCam network recovery test passed');
 }
 

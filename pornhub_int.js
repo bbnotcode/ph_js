@@ -1,7 +1,7 @@
 WidgetMetadata = {
     id: "Pornhub_int",
     title: "Pornhub",
-    version: "1.1.5",
+    version: "1.1.6",
     requiredVersion: "0.0.1",
     description: "網路收集到的模塊",
     author: "海带",
@@ -938,7 +938,7 @@ async function getSearchResults(params) {
     const sortBy = params.sort_by || "";
     const searchType = params.search_type || "no";  // 获取是否开启精准搜索的设置
 
-    const formattedQuery = searchQuery.trim().replace(/[\s\-]+/g, '+').toLowerCase();;
+    const formattedQuery = searchQuery.trim().toLowerCase().split(/[\s\-]+/).map(encodeURIComponent).join('+');
     let baseUrl = `https://cn.pornhub.com/video/search?search=${formattedQuery}`;
     if (sortBy === 'new') baseUrl += '&o=mr';
     else if (sortBy === 'views') baseUrl += '&o=mv';

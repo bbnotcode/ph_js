@@ -61,7 +61,7 @@ function searchPath(query, page, mode) { const key = mode === 'actor' ? 'actor' 
 function codePrefix(query) { const m = String(query || '').trim().toUpperCase().match(/[A-Z]{2,}/); return m ? m[0] : ''; }
 function canonicalCode(value) { return String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '').replace(/^\d{2,4}(?=[A-Z])/, ''); }
 
-function getManifest() { return { id: 'manko-fun', name: 'Manko.fun 中文版', title: 'Manko.fun 中文版', version: '1.8.0', author: MANKO_AUTHOR, logo: MANKO_BASE + '/images/metaog.png', capabilities: { search: true, aggregation: true, playbackHistory: true }, aggregation: { search: true, playbackHistory: true } }; }
+function getManifest() { return { id: 'manko-fun', name: 'Manko.fun 中文版', title: 'Manko.fun 中文版', version: '1.8.1', author: MANKO_AUTHOR, logo: MANKO_BASE + '/images/metaog.png', capabilities: { search: true, aggregation: true, playbackHistory: true }, aggregation: { search: true, playbackHistory: true } }; }
 async function getCategory(ctx) {
   const id = String(pick(ctx, ['pageId','categoryId','id'], 'new')); const page = Math.max(1, Number(pick(ctx, ['page','pg','currentPage','pageNumber','pageIndex'], 1)) || 1); let title = '影片', result;
   if (id === 'genres') { const all = await apiGet('common/list-genre'); const list = Array.isArray(all) ? all : []; const limit = 48; const values = list.slice((page - 1) * limit, page * limit); const items = values.map(x => directoryTextCard('genre', x, genreZh(x), genreZh(x) === x ? '内容类型' : x)); return { pageType: 'category', id, title: '全部内容类型', style: 'discover.annualCategories', page, nextPage: page + 1, limit, total: list.length, totalPages: Math.ceil(list.length / limit), hasMore: page * limit < list.length, items }; }
@@ -76,8 +76,8 @@ async function getCategory(ctx) {
 }
 async function getHome() { const first = await getCategory({ pageId: 'new', page: 1 }); const lazy = (id, title) => ({ id, title, style: 'discover.annualPosterStack', lazy: true, loadAction: { type: 'custom', id, sectionId: id, title }, items: [] }); return { pageType: 'home', id: 'manko-home-zh-v3', title: 'Manko.fun 中文版', heroAspectRatio: '16:9', hero: first.items.slice(0, 6), sections: [{ id: 'new', title: '✨ 最新作品', style: 'discover.standard', moreAction: { type: 'category', pageId: 'new', title: '✨ 最新作品' }, items: first.items.slice(0, 12) }, lazy('primary-nav', '快捷导航'), lazy('category-nav', '影片类别'), lazy('genre-nav', '内容类型'), lazy('maker-nav', '制作商'), lazy('actor-nav', '演员分类')] }; }
 async function getHomeSection(ctx) { const id = String(pick(ctx, ['sectionId','id'], 'new')); try {
-  if (id === 'primary-nav') { const items = await Promise.all(MANKO_PRIMARY_NAV.map(primaryNavCard)); return { id, title: '快捷导航', style: 'discover.annualPosterStack', lazy: false, items: items.filter(x => x.poster) }; }
-  if (id === 'category-nav') { const items = await Promise.all(MANKO_VIDEO_CATEGORIES.map(primaryNavCard)); return { id, title: '影片类别', style: 'discover.annualPosterStack', lazy: false, items: items.filter(x => x.poster) }; }
+  if (id === 'primary-nav') { const items = await loadNavCards(MANKO_PRIMARY_NAV); return { id, title: '快捷导航', style: 'discover.annualPosterStack', lazy: false, items: items.filter(x => x.poster) }; }
+  if (id === 'category-nav') { const items = await loadNavCards(MANKO_VIDEO_CATEGORIES); return { id, title: '影片类别', style: 'discover.annualPosterStack', lazy: false, items: items.filter(x => x.poster) }; }
   if (id === 'genre-nav') { const p = await getCategory({ pageId: 'genres', page: 1 }); return { id, title: '内容类型', style: 'discover.annualCategories', lazy: false, moreAction: { type: 'category', pageId: 'genres', title: '全部内容类型' }, items: p.items }; }
   if (id === 'maker-nav') { const p = await getCategory({ pageId: 'makers', page: 1 }); return { id, title: '制作商', style: 'discover.annualCategories', lazy: false, moreAction: { type: 'category', pageId: 'makers', title: '全部制作商' }, items: p.items }; }
   if (id === 'actor-nav') { const defs = [['Censored','有码演员'],['Uncensored','无码演员'],['Western','西方演员']]; const items = await Promise.all(defs.map(async d => { const rows = await apiGet('swx/movie/actor/' + d[0] + '?offset=0&limit=3'); const previews = (Array.isArray(rows) ? rows : []).map(actorCard); const lead = previews[0] || {}; return { id: 'actors:' + d[0], title: d[1], subtitle: '浏览全部演员', type: 'collection', poster: lead.poster || '', backdrop: lead.backdrop || lead.poster || '', imageHeaders: MANKO_HEADERS, previewItems: previews, action: { type: 'category', pageId: 'actors:' + d[0], title: d[1] } }; })); return { id, title: '演员分类', style: 'discover.annualPosterStack', lazy: false, items: items.filter(x => x.poster) }; }
@@ -91,3 +91,11 @@ async function search(ctx) { const query = String(pick(ctx, ['query','keyword','
 const api = { getManifest, getHome, getHomeSection, getCategory, getDetail, getResourceVersions, resolvePlayback, search };
 Object.assign(globalThis, api);
 if (typeof module !== 'undefined') module.exports = Object.assign({ _test: { decodeBase91, apiMovie, categoryPath, genreZh, actorZh, actorCard, castMember, directoryCard, directoryTextCard, filteredMoviePath, primaryNavCard, searchMode, searchPath, codePrefix, canonicalCode, MANKO_AUTHOR, MANKO_PRIMARY_NAV, MANKO_VIDEO_CATEGORIES } }, api);
+
+async function loadNavCards(definitions) {
+  const cards = new Array(definitions.length); let next = 0;
+  await Promise.all(Array.from({ length: Math.min(2, definitions.length) }, async function () {
+    while (next < definitions.length) { const index = next++; try { cards[index] = await primaryNavCard(definitions[index]); } catch (_) {} }
+  }));
+  return cards.filter(Boolean);
+}

@@ -1,0 +1,259 @@
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+const root = path.resolve(__dirname, '..');
+function load(file, additions = {}) {
+  const context = vm.createContext({ console: { log() {}, warn() {}, error() {} }, URL, URLSearchParams, Buffer, atob, btoa,
+    TextDecoder, TextEncoder, setTimeout, clearTimeout, module: { exports: {} },
+    Widget: { http: { async get() { return { status: 200, statusCode: 200, data: '<html><body></body></html>' }; } }, storage: { get() { return null; } } }, ...additions });
+  vm.runInContext(fs.readFileSync(path.join(root, file), 'utf8'), context, { filename: file, timeout: 2000 });
+  return context;
+}
+function plain(value) { return JSON.parse(JSON.stringify(value)); }
+const master = '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=2000000,RESOLUTION=1920x1080\n1080.m3u8\n#EXT-X-STREAM-INF:BANDWIDTH=900000,RESOLUTION=1280x720\n720.m3u8\n';
+const media = '#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXTINF:4,\nsegment.ts\n';
+
+for (const file of ['123av-mini-library.js', 'girigirilove-mini-library.js', 'kbjfan-mini-library.js', 'taolusm-mini-library.js', 'xxxfollow-mini-library 5.js']) {
+  test(`${file}: object and JSON-string search contexts request the same page`, async () => {
+    const c = load(file); const requests = [];
+    c.Widget.http.get = async (url) => { requests.push(url); return { status: 200, data: '<html><body></body></html>' }; };
+    c.Widget.http.post = async (url, body) => { requests.push(url + '|' + body); return { status: 200, data: '<html><body></body></html>' }; };
+    const input = { query: 'A&B #tag', page: 2 };
+    await c.search(input).catch(() => {}); const objectRequests = requests.splice(0);
+    await c.search(JSON.stringify(input)).catch(() => {});
+    assert.ok(objectRequests.length > 0); assert.deepEqual(requests, objectRequests);
+  });
+}
+
+test('Jable home waits for one category; all remaining categories load lazily', async () => {
+  const c = load('jable.media-library.js'); let calls = 0;
+  c.loadPosterWall = async () => { calls++; return [{ id: 'fresh', title: 'Fresh', poster: 'https://img.test/fresh.jpg' }]; };
+  const home = await c.getHome({});
+  assert.equal(calls, 1); assert.equal(home.hero.length, 1);
+  assert.ok(home.sections.filter(s => s.lazy).length > 20);
+  const section = await c.getHomeSection({ sectionId: 'hot' });
+  assert.equal(section.lazy, false); assert.equal(section.items.length, 1); assert.equal(calls, 2);
+});
+test('Jable refreshes a saved detail playback action even when it contains an old URL', async () => {
+  const c = load('jable.media-library.js'); let calls = 0;
+  c.getDetail = async () => { calls++; return { id: 'https://jable.tv/videos/a/', link: 'https://jable.tv/videos/a/', videoUrl: 'https://cdn.test/fresh.m3u8' }; };
+  const result = await c.resolvePlayback({ itemId: 'https://jable.tv/videos/a/', versionId: 'https://jable.tv/videos/a/#hls', url: 'https://cdn.test/expired.m3u8' });
+  assert.equal(result.url, 'https://cdn.test/fresh.m3u8'); assert.equal(calls, 1);
+});
+test('591AV fails an incomplete two-page batch and keeps its page available for retry', async () => {
+  const c = load('591av-mini-library.js'); let calls = 0;
+  c.fetchText = async () => { if (++calls === 1) throw new Error('temporary failure'); return '<html></html>'; };
+  const result = await c.getCategory({ pageId: 'new', page: 1 });
+  assert.ok(result.error); assert.equal(result.nextPage, 1); assert.equal(result.hasMore, true); assert.equal(result.items.length, 0);
+});
+test('591AV recovers the same batch without skipping source page one', async () => {
+  const c = load('591av-mini-library.js'); const requests = [];
+  c.fetchText = async (ctx, url) => { requests.push(url); return url; };
+  c.parseCards = html => [{ id: new URL(html).searchParams.get('from') === '2' ? 'source-two' : 'source-one', title: 'Video' }];
+  const first = await c.getCategory({ pageId: 'new', page: 1 });
+  const retry = await c.getCategory({ pageId: 'new', page: 1 });
+  assert.deepEqual(plain(retry.items), plain(first.items)); assert.equal(requests[0], requests[2]); assert.equal(requests[1], requests[3]);
+  assert.deepEqual(plain(first.items.map(item => item.id)), ['source-one', 'source-two']);
+});
+test('591AV home does not wait for six category previews', async () => {
+  const c = load('591av-mini-library.js'); let calls = 0;
+  c.fetchText = async () => { calls++; return 'latest'; }; c.parseCards = () => [{ id: 'latest', poster: 'https://img.test/a.jpg' }];
+  const home = await c.getHome({}); assert.equal(calls, 1); assert.equal(home.sections[0].lazy, true);
+});
+
+for (const file of ['madou8-domestic-mini-library.js', 'madou8-mini-library 5.js']) {
+  for (const requested of [1080, 0, 2160]) {
+    test(`${file}: lower first line does not hide the later 1080P line (${requested})`, async () => {
+      const c = load(file); const requestedURLs = [];
+      c.fetchHlsText = async (ctx, url) => { requestedURLs.push(url); return media; };
+      const result = await c.chooseStream({}, [{ url: 'https://cdn.test/720p/stream.m3u8' }, { url: 'https://cdn.test/1080p/stream.m3u8' }], requested, 'https://madou8.pw/detail');
+      assert.equal(result.height, 1080); assert.equal(requestedURLs.length, 2);
+    });
+  }
+  test(`${file}: master-discovered lower fallback still explores another line`, async () => {
+    const c = load(file);
+    c.fetchHlsText = async (ctx, url) => url.includes('master720') ? master.replace(/1920x1080/g, '1280x720').replace(/1080\.m3u8/g, '720.m3u8') : media;
+    const result = await c.chooseStream({}, [{ url: 'https://cdn.test/master720.m3u8' }, { url: 'https://cdn.test/1080p/stream.m3u8' }], 1080, 'https://madou8.pw/detail');
+    assert.equal(result.height, 1080);
+  });
+}
+test('1808 network failure is labeled historical and cannot generate playable lines', async () => {
+  const c = load('1808-mini-library.js'); c.Widget.http.get = async () => { throw new Error('offline'); };
+  const home = await c.getHome({}); assert.ok(home.sections[0].error); assert.match(home.sections[0].title, /历史/); assert.match(home.hero[0].subtitle, /历史/);
+  await assert.rejects(c.getDetail({ itemId: '/movies/new_slug.html' }), /offline/);
+  await assert.rejects(c.resolvePlayback({ itemId: '/movies/new_slug.html' }), /offline/);
+  assert.equal(c.syntheticPlaybackLines, undefined);
+});
+test('1808 defaults to the highest real source line and validates the current HLS', async () => {
+  const c = load('1808-mini-library.js');
+  c.fetchText = async (ctx, url) => url.includes('.m3u8') ? media : '<html>current</html>';
+  c.parseDetailPage = () => ({ title: 'Film', poster: '', overview: '', actorText: '', related: [], referer: 'https://1808.online/movies/a.html', urls: [
+    { title: '360P', url: 'https://cdn.test/360/a.m3u8' }, { title: '720P', url: 'https://cdn.test/720/a.m3u8' }] });
+  const detail = await c.getDetail({ itemId: '/movies/a.html' }); assert.equal(detail.resourceGroups[0].versions[0].name, '720P');
+  const result = await c.resolvePlayback({ itemId: '/movies/a.html' }); assert.equal(result.url, 'https://cdn.test/720/a.m3u8');
+});
+test('Giri excludes history links, bounds episode groups and preserves parent item IDs', async () => {
+  const c = load('girigirilove-mini-library.js');
+  const history = '<a href="/play/999-1-1/">2026</a>';
+  assert.equal(c.parseDetail({}, history, 'film').episodes.length, 0);
+  const html = '<h1>Series</h1><span class="slide-info-remarks">更新至1集</span><div class="anthology-list-box"><div><a x-effect="visible => show()" href="/play/123-1-1/">1</a></div></div>' + history;
+  c.fetchText = async () => html;
+  const result = await c.getDetail({ itemId: 'series' }); assert.equal(result.type, 'series'); assert.equal(result.seasons[0].episodes.length, 1);
+  const action = result.seasons[0].episodes[0].action;
+  assert.equal(c.decodePayload(action.itemId).id, 'series'); assert.equal(c.decodePayload(action.episodeId).id, 'play/123-1-1');
+  c.fetchText = async () => '<h1>Film</h1><div class="anthology-list-box"><a href="/play/456-1-1/">正片</a></div>';
+  const film = await c.getDetail({ itemId: 'film' }); assert.equal(film.type, 'movie'); assert.equal(film.seasons.length, 0); assert.equal(film.resourceGroups.length, 1);
+});
+test('Giri parses quoted > in card attributes and never caches HTTP errors', async () => {
+  const c = load('girigirilove-mini-library.js');
+  const html = '<a x-effect="visible => show()" class="public-list-exp" href="/video/123/" title="Good"><img src="https://img.test/a.jpg"></a>';
+  assert.equal(c.parseCards({}, html).length, 1);
+  c.Widget.http.get = async () => ({ status: 503, data: '<html><title>Service Unavailable</title></html>' });
+  await assert.rejects(c.fetchText({}, 'https://girigirilove.com/video/123/'), /503/);
+  c.Widget.http.get = async () => ({ status: 200, data: html });
+  assert.equal(await c.fetchText({}, 'https://girigirilove.com/video/123/'), html);
+});
+test('MissAV does not invoke player/browser fallbacks after a complete master discovery', async () => {
+  const c = load('missav-mini-library-download-working 6.js'); let linked = 0, browser = 0;
+  c.fetchText = async () => '<script>var source="https://cdn.test/master.m3u8"</script>';
+  c.discoverAvailableQualities = async () => [{ height: 1080, url: 'https://cdn.test/1080.m3u8' }, { height: 720, url: 'https://cdn.test/720.m3u8' }];
+  c.extractPlayableFromLinkedPlayers = async () => { linked++; return ''; }; c.extractFromBrowser = async () => { browser++; return ''; };
+  const result = await c.resolvePlayback({ itemId: c.makeItemId('https://missav.ws/cn/a', 'A', '') });
+  assert.equal(result.url, 'https://cdn.test/1080.m3u8'); assert.equal(linked, 0); assert.equal(browser, 0);
+});
+test('MissAV 1.5.10 accepts the original 1.0.7 detail payload and all legacy parameter names', () => {
+  const c = load('missav-mini-library-download-working 6.js');
+  const old = 'missav://detail?url=https%3A%2F%2Fmissav.ws%2Fdm247%2Fcn%2Fsample&title=Old';
+  assert.equal(c.detailUrlFromContext({ itemId: old }), 'https://missav.ws/dm247/cn/sample');
+  const names = c.getManifest().parameters.map(p => p.name);
+  for (const name of ['baseURL', 'entryPath', 'backupBaseURLs', 'enableBrowserFallback', 'browserVisible', 'requestTimeoutSeconds', 'cacheMinutes']) assert.ok(names.includes(name));
+});
+test('MissAV resource discovery failure does not become a fake playable webpage', async () => {
+  const c = load('missav-mini-library-download-working 6.js');
+  c.fetchText = async () => { throw new Error('503'); }; c.extractFromBrowser = async () => '';
+  const groups = await c.getResourceVersions({ itemId: c.makeItemId('https://missav.ws/cn/a', 'A', '') });
+  assert.equal(Array.isArray(groups) ? groups.length : groups.groups?.length || 0, 0);
+});
+for (const file of ['missav-mini-library-download-working 6.js', 'sexbjcam-mini-library.js', 'javgg-mini-library.js', 'novipnoad-mini-library.js']) {
+  test(`${file}: a hung resolver has one overall deadline`, async () => {
+    const c = load(file, { setTimeout: (fn) => setTimeout(fn, 15) });
+    c.resolvePlaybackWithinBudget = async () => new Promise(() => {});
+    const start = Date.now(); await assert.rejects(c.resolvePlayback({}), /total-deadline/); assert.ok(Date.now() - start < 500);
+  });
+}
+test('XXXFollow refreshes a saved payload instead of trusting its expired cached URL', async () => {
+  const c = load('xxxfollow-mini-library 5.js');
+  const old = c.makePlaybackPayload('fresh', 'https://cdn.test/old.mp4', '', 'Saved');
+  c.findById = () => ({ id: 'fresh', videoUrl: 'https://cdn.test/new.mp4', title: 'New' });
+  const result = await c.resolvePlayback({ itemId: old, url: 'https://cdn.test/old.mp4' }); assert.equal(result.url, 'https://cdn.test/new.mp4');
+});
+test('4KVM retains the historical version ID without claiming every captured stream is 1080P', async () => {
+  const c = load('4kvm-dreamby-mini-library.js');
+  assert.equal(c.kvmVersions('1')[0].id, 'public-1080'); assert.match(c.kvmVersions('1')[0].name, /自动/);
+  c.Widget.browser = { async fetch() { return { mediaSources: [{ url: 'https://cdn.test/360.mp4' }] }; } };
+  assert.equal((await c.resolvePlayback({ itemId: '1' })).url, 'https://cdn.test/360.mp4');
+  c.Widget.browser.fetch = async () => ({ mediaSources: [{ url: 'https://cdn.test/ads/1080.mp4' }, { url: 'https://cdn.test/main/360.mp4' }] });
+  assert.equal((await c.resolvePlayback({ itemId: '1' })).url, 'https://cdn.test/main/360.mp4');
+});
+test('Pornhub sorts by actual quality and marks only the highest as default', () => {
+  const c = load('pornhub.media-library.js');
+  const result = c.sortMediaSources([{ id: '360', quality: 360, default: true }, { id: '1080', quality: 1080, default: false }]);
+  assert.deepEqual(plain(result.map(x => x.quality)), [1080, 360]); assert.equal(result.filter(x => x.default).length, 1);
+});
+test('Manko keeps successful navigation cards when one category fails', async () => {
+  const c = load('manko-fun-mini-library.js'); let active = 0, max = 0;
+  c.primaryNavCard = async definition => { active++; max = Math.max(max, active); await Promise.resolve(); active--; if (definition[0] === 'new') throw new Error('offline'); return { id: definition[0], poster: 'https://img.test/a.jpg' }; };
+  const section = await c.getHomeSection({ sectionId: 'primary-nav' }); assert.ok(section.items.length > 0); assert.ok(max <= 2);
+});
+test('ASMRLIB category previews come from their own category and load after home', async () => {
+  const c = load('asmrlib-mini-library.js'); c.asmrHTTP = async () => '<html></html>';
+  c.asmrParseList = () => [{ id: 'home', poster: 'https://img.test/home.jpg' }];
+  const home = await c.getHome(); assert.equal(home.sections[1].lazy, true);
+  const requested = []; c.getCategory = async ({ pageId }) => { requested.push(pageId); return { items: [0,1,2].map(i => ({ id: `${pageId}-${i}`, poster: `https://img.test/${pageId}-${i}.jpg` })) }; };
+  const section = await c.getHomeSection({ sectionId: 'categories' }); assert.ok(requested.length >= 3);
+  assert.ok(section.items.every(x => x.previewItems[0].id.startsWith(x.action.pageId + '-')));
+});
+test('Jable Forward adds sorting and page parameters once', async () => {
+  const c = load('jable.js'); let captured;
+  c.Widget.http.get = async url => { captured = new URL(url); throw new Error('fixture stop'); };
+  await assert.rejects(c.search({ keyword: 'A&B #tag', sort_by: 'video_viewed', from: 2 }), /fixture stop/);
+  assert.deepEqual(captured.searchParams.getAll('sort_by'), ['video_viewed']); assert.deepEqual(captured.searchParams.getAll('from'), ['2']);
+  assert.equal(captured.searchParams.get('q'), 'A&B #tag');
+});
+
+for (const keyword of ['中文 空格', 'A&B #tag', 'C++ 100%', '"quoted"']) {
+  test(`Forward search retains special characters: ${keyword}`, async () => {
+    const c91 = load('91porny_int.js'); let url91;
+    vm.runInContext('widgetAPI.getHtml = async function(url) { globalThis.capturedSearchURL = url; throw new Error("stop"); }', c91);
+    await c91.search({ keyword, page: 2 }); url91 = new URL(c91.capturedSearchURL);
+    assert.equal(url91.searchParams.get('keywords'), keyword); assert.equal(url91.searchParams.get('page'), '2'); assert.equal(url91.hash, '');
+    const cPH = load('pornhub_int.js'); let urlPH;
+    cPH.Widget.http.get = async url => { urlPH = new URL(url); throw new Error('stop'); };
+    await assert.rejects(cPH.getSearchResults({ search_query: keyword, page: 2 }), /stop/);
+    assert.equal(urlPH.searchParams.get('search'), keyword.trim().toLowerCase().replace(/[\s\-]+/g, ' '));
+    assert.equal(urlPH.searchParams.get('page'), '2'); assert.equal(urlPH.hash, '');
+  });
+}
+
+test('Giri selected episode keeps its version and resolves its own play page', async () => {
+  const c = load('girigirilove-mini-library.js');
+  const parent = c.encodePayload({id:'GV123'}); const selected = c.encodePayload({id:'play/123-1-2',episodeTitle:'第2集'});
+  const groups = await c.getResourceVersions({itemId:parent, episodeId:selected});
+  assert.equal(groups[0].versions.length, 1); assert.equal(c.decodePayload(groups[0].versions[0].id).id,'play/123-1-2');
+  const pages = []; c.resolvePlayPage = async (ctx,id) => {pages.push(id);return {url:'https://cdn.test/episode2.m3u8'};};
+  const result = await c.resolvePlayback({itemId:parent, episodeId:selected,versionId:groups[0].versions[0].id});
+  assert.equal(result.url,'https://cdn.test/episode2.m3u8'); assert.deepEqual(pages,['play/123-1-2']);
+});
+
+for (const mode of ['expired', 'rejected']) {
+  test(`MissAV Forward refreshes a ${mode} URL and can recover after failure`, async () => {
+    const c = load('MissAV 3.0.js'); const requests = [];
+    c.Widget.html = { load: () => selector => ({length: selector === '#videodetails' ? 1 : 0,attr: () => 'https://missav.ai/cn/ABP-123'}) };
+    c.extractVideoUrlFromHtml = () => 'https://cdn.test/new.m3u8';
+    vm.runInContext(`VIDEO_URL_CACHE['ABP-123'] = {url:'https://cdn.test/old.m3u8',timestamp:Date.now()-${mode === 'expired' ? 61000 : 1000},referer:'https://missav.ai/cn/ABP-123'}`,c);
+    c.Widget.http.get = async url => {requests.push(url);return url.includes('old.m3u8') ? {statusCode:403,data:''} : {statusCode:200,data:'<html>detail</html>'};};
+    const result = await c.loadResource({code:'ABP-123'});
+    assert.equal(result[0].url,'https://cdn.test/new.m3u8'); assert.ok(requests.some(url => url.includes('/cn/search/')));
+    assert.equal(requests.some(url => url.includes('old.m3u8')),mode === 'rejected');
+    c.Widget.http.get = async () => {throw new Error('temporary');};
+    assert.equal((await c.loadResource({code:'ABP-123'})).length,0);
+    c.Widget.http.get = async () => ({statusCode:200,data:'<html>detail</html>'});
+    assert.equal((await c.loadResource({code:'ABP-123'}))[0].url,'https://cdn.test/new.m3u8');
+  });
+}
+
+test('MissAV playback budget owns browser fallback and preserves attached cookies', () => {
+  const c = load('missav-mini-library-download-working 6.js');
+  const options = c.requestOptions({__playbackBudget:{endAt:Date.now()+2000,expired:false}},'https://missav.ws/');
+  assert.ok(options.timeout > 0 && options.timeout <= 2); assert.equal(options.useBrowserFallback,false); assert.equal(options.attachBrowserCookie,true);
+});
+
+test('Novip playback awaits native browser media and caps both HTTP and browser stages', async () => {
+  const c = load('novipnoad-mini-library.js'); const calls=[];
+  c.parsePlayInfo = () => ({vid:'video123',pkey:'key'}); c.parseEpisodes = () => [];
+  c.Widget.http.get = async (url,options) => {calls.push(options);return {status:200,data:'<html>detail</html>'};};
+  c.Widget.browser = {async fetch(url,options){calls.push(options);return {mediaSources:['https://cdn.test/final.m3u8']};}};
+  const result = await c.resolvePlayback({itemId:'/movie/123.html'});
+  assert.equal(result.url,'https://cdn.test/final.m3u8'); assert.equal(calls.length,2);
+  assert.ok(calls[0].timeout <= 6 && calls[1].timeout <= 12);
+});
+
+test('Context normalization keeps user parameter precedence and distinct content/episode IDs', async () => {
+  const c = load('girigirilove-mini-library.js'); const requests=[];
+  c.Widget.http.get = async url => {requests.push(url);return {status:200,data:'<html></html>'};};
+  await c.getCategory(JSON.stringify({pageId:'latest',parameters:JSON.stringify({page:2}),params:{baseURL:'https://custom.test'},config:{baseURL:'https://ignored.test'}}));
+  assert.ok(requests.length > 0); assert.ok(requests.every(url=>url.startsWith('https://custom.test/')));
+  const parent=c.encodePayload({id:'GV123'}); const episode=c.encodePayload({id:'play/123-1-2'});
+  c.resolvePlayPage = async (ctx,id) => ({url:'https://cdn.test/'+id.split('-').pop()+'.m3u8'});
+  assert.equal((await c.resolvePlayback(JSON.stringify({itemId:parent,episodeId:episode}))).url,'https://cdn.test/2.m3u8');
+});
+
+test('XVideos attaches the configured session token without printing it', async () => {
+  const logs=[]; const token='fixture-session-secret';
+  const c=load('xvideos_int.js',{console:{log:(...args)=>logs.push(args.join(' ')),error:(...args)=>logs.push(args.join(' '))},setTimeout:()=>0});
+  c.Widget.storage.getItem=async()=>token;
+  const options=await vm.runInContext('widgetAPI.getDefaultOptions()',c);
+  assert.equal(options.headers.Cookie,'session_token='+token); assert.ok(logs.every(line=>!line.includes(token)));
+});

@@ -9,8 +9,8 @@ const WidgetMetadata = {
   id: 'taolusm-mini-library',
   name: '套路SM',
   title: '套路SM',
-  version: '1.0.0',
-  author: 'EL',
+  version: '1.0.1',
+  author: 'Alan huang',
   logo: TAOLUSM_LOGO,
   icon: TAOLUSM_LOGO,
   site: TAOLUSM_DEFAULT_BASE,
@@ -71,6 +71,7 @@ function getManifest() {
 }
 
 async function getHome(ctx) {
+  ctx = normalizeRuntimeContext(ctx);
   let latestItems = [];
   try {
     const html = await fetchText(ctx, categoryURL(ctx, '/'));
@@ -110,6 +111,7 @@ async function getHome(ctx) {
 }
 
 async function getHomeSection(ctx) {
+  ctx = normalizeRuntimeContext(ctx);
   const sectionId = stringValue(ctx && (ctx.sectionId || ctx.id));
   const section = findSection(sectionId) || TAOLUSM_SECTIONS[0];
   try {
@@ -128,6 +130,7 @@ async function getHomeSection(ctx) {
 }
 
 async function getCategory(ctx) {
+  ctx = normalizeRuntimeContext(ctx);
   const page = positiveInt(contextValue(ctx, 'page'), 1);
   const pageId = normalizePageId(ctx && (ctx.pageId || ctx.id || ctx.category || ctx.genreId));
   const section = findSection(pageId) || TAOLUSM_SECTIONS[0];
@@ -148,6 +151,7 @@ async function getCategory(ctx) {
 }
 
 async function getDetail(ctx) {
+  ctx = normalizeRuntimeContext(ctx);
   const id = itemIdFromContext(ctx);
   if (!id) throw new Error('套路SM 详情参数无效');
 
@@ -197,12 +201,14 @@ async function getDetail(ctx) {
 }
 
 function getResourceVersions(ctx) {
+  ctx = normalizeRuntimeContext(ctx);
   const id = itemIdFromContext(ctx);
   if (!id) return [];
   return resourceGroupsFor(ctx, id, stringValue(ctx && ctx.title) || '在线播放');
 }
 
 function resolvePlayback(ctx) {
+  ctx = normalizeRuntimeContext(ctx);
   const id = itemIdFromContext(ctx);
   const url = stringValue(ctx && ctx.url) || (id ? downloadURL(ctx, id) : '');
   if (!url) throw new Error('套路SM 播放参数无效');
@@ -217,6 +223,7 @@ function resolvePlayback(ctx) {
 }
 
 async function search(ctx) {
+  ctx = normalizeRuntimeContext(ctx);
   const query = cleanText(contextValue(ctx, 'query') || contextValue(ctx, 'keyword') || contextValue(ctx, 'text'));
   const page = positiveInt(contextValue(ctx, 'page'), 1);
   if (!query) {
@@ -523,4 +530,17 @@ function stringValue(value) {
 
 function escapeRegExp(text) {
   return stringValue(text).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function normalizeRuntimeContext(input) {
+  let ctx = input;
+  if (typeof ctx === 'string') { try { ctx = JSON.parse(ctx); } catch (_) { ctx = {}; } }
+  if (!ctx || typeof ctx !== 'object' || Array.isArray(ctx)) return {};
+  const nested = {};
+  ['params', 'config', 'settings', 'parameters', 'pagination', 'pageInfo'].forEach(function (key) {
+    let bag = ctx[key];
+    if (typeof bag === 'string') { try { bag = JSON.parse(bag); } catch (_) { bag = null; } }
+    if (bag && typeof bag === 'object' && !Array.isArray(bag)) Object.keys(bag).forEach(function (name) { if (nested[name] === undefined) nested[name] = bag[name]; });
+  });
+  return Object.assign(nested, ctx);
 }

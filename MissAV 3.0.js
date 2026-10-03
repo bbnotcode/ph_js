@@ -3,7 +3,7 @@ WidgetMetadata = {
     title: "MissAV_ovo",
     author: "𝙈𝙖𝙠𝙠𝙖𝙋𝙖𝙠𝙠𝙖|CC|EL|Eric|墨白",
     description: "MissAV 视频聚合模块，支持其他模块聚合missav资源、支持高清海报、封面图、预告片、相似推荐、演员信息及头像",
-    version: "3.0",
+    version: "3.0.1",
     requiredVersion: "0.0.1",
     site: "https://missav.ai",
     modules: [
@@ -1794,7 +1794,26 @@ async function loadResource(params = {}) {
         const code = extractCodeFromParams(params);
         if (!code) return [];
 
-        let cached = VIDEO_URL_CACHE[code.toUpperCase()];
+        const cacheKey = code.toUpperCase();
+        let cached = VIDEO_URL_CACHE[cacheKey];
+        if (cached && Date.now() - Number(cached.timestamp || 0) >= 60000) {
+            delete VIDEO_URL_CACHE[cacheKey];
+            cached = null;
+        }
+        if (cached) {
+            try {
+                const isHLS = /\.m3u8(?:[?#]|$)/i.test(cached.url);
+                const response = await Widget.http.get(cached.url, {
+                    headers: { ...HEADERS, Referer: cached.referer, ...(isHLS ? {} : { Range: 'bytes=0-0' }) },
+                    timeout: 5000
+                });
+                const status = Number(response && (response.statusCode || response.status));
+                if (status < 200 || status >= 300 || !status || (isHLS && !/^\s*#EXTM3U/.test(String(response.data || '')))) throw new Error('cached media unavailable');
+            } catch (_) {
+                delete VIDEO_URL_CACHE[cacheKey];
+                cached = null;
+            }
+        }
         let videoUrl = cached ? cached.url : null;
         let currentReferer = cached?.referer || `${BASE_URL}/cn/search/${encodeURIComponent(code.trim())}`;
         let detailHtml = "";
@@ -1881,7 +1900,9 @@ async function loadResource(params = {}) {
             }
 
             if (videoUrl) {
-                VIDEO_URL_CACHE[code.toUpperCase()] = { url: videoUrl, timestamp: Date.now(), referer: currentReferer };
+                VIDEO_URL_CACHE[cacheKey] = { url: videoUrl, timestamp: Date.now(), referer: currentReferer };
+                const cacheKeys = Object.keys(VIDEO_URL_CACHE);
+                if (cacheKeys.length > 100) delete VIDEO_URL_CACHE[cacheKeys[0]];
             }
         }
 

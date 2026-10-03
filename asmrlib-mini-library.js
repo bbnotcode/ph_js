@@ -191,7 +191,7 @@ function getManifest() {
     id: 'asmrlib',
     name: 'ASMRLIB',
     title: 'ASMRLIB',
-    version: '1.2.0',
+    version: '1.2.1',
     author: 'Alan huang',
     logo: ASMRLIB_LOGO,
     icon: ASMRLIB_LOGO,
@@ -203,19 +203,6 @@ function getManifest() {
 async function getHome() {
   const html = await asmrHTTP(ASMRLIB_BASE + '/', ASMRLIB_BASE + '/');
   const latest = asmrParseList(html);
-  const categoryItems = ASMRLIB_CATEGORIES.slice(1).map(function (category, index) {
-    return {
-      id: 'asmrlib-category-' + category.id,
-      title: category.title,
-      subtitle: '浏览 ' + category.title + ' 标签',
-      type: 'collection',
-      poster: latest[index % Math.max(latest.length, 1)] ? latest[index % latest.length].poster : ASMRLIB_LOGO,
-      backdrop: latest[index % Math.max(latest.length, 1)] ? latest[index % latest.length].poster : ASMRLIB_LOGO,
-      imageHeaders: asmrImageHeaders(),
-      previewItems: latest.slice(index, index + 3),
-      action: { type: 'category', pageId: category.id, title: category.title }
-    };
-  });
   return {
     pageType: 'home',
     id: 'asmrlib-home',
@@ -224,7 +211,7 @@ async function getHome() {
     hero: latest.slice(0, 6),
     sections: [
       { id: 'latest', title: '最新更新', style: 'discover.standard', lazy: false, items: latest, moreAction: { type: 'category', pageId: 'latest', title: '最新更新' } },
-      { id: 'categories', title: '热门标签', style: 'discover.annualListPreview', lazy: false, items: categoryItems }
+      { id: 'categories', title: '热门标签', style: 'discover.annualListPreview', lazy: true, loadAction: { type: 'custom', id: 'categories', sectionId: 'categories', title: '热门标签' }, items: [] }
     ]
   };
 }
@@ -232,8 +219,22 @@ async function getHome() {
 async function getHomeSection(input) {
   const id = asmrText(asmrPick(input, ['sectionId', 'id'], 'latest'));
   if (id === 'categories') {
-    const home = await getHome();
-    return home.sections[1];
+    const categories = ASMRLIB_CATEGORIES.slice(1);
+    const cards = []; let cursor = 0;
+    await Promise.all(Array.from({ length: Math.min(2, categories.length) }, async function () {
+      while (cursor < categories.length) {
+        const index = cursor++; const category = categories[index];
+        try {
+          const page = await getCategory({ pageId: category.id, page: 1 });
+          const previews = (page.items || []).slice(0, 3); const lead = previews[0];
+          if (!lead || !lead.poster) continue;
+          cards[index] = { id: 'asmrlib-category-' + category.id, title: category.title, subtitle: '浏览 ' + category.title + ' 标签',
+            type: 'collection', poster: lead.poster, backdrop: lead.backdrop || lead.poster, imageHeaders: asmrImageHeaders(), previewItems: previews,
+            action: { type: 'category', pageId: category.id, title: category.title } };
+        } catch (_) {}
+      }
+    }));
+    return { id: 'categories', title: '热门标签', style: 'discover.annualListPreview', lazy: false, items: cards.filter(Boolean) };
   }
   const page = await getCategory({ pageId: id, page: 1 });
   return { id: id, title: page.title, style: 'discover.standard', lazy: false, items: page.items || [] };

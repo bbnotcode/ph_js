@@ -9,8 +9,8 @@ const WidgetMetadata = {
   id: 'kbjfan-mini-library',
   name: 'KBJFan',
   title: 'KBJFan',
-  version: '1.0.0',
-  author: 'EL',
+  version: '1.0.1',
+  author: 'Alan huang',
   logo: KBJFAN_LOGO,
   icon: KBJFAN_LOGO,
   site: KBJFAN_DEFAULT_BASE,
@@ -60,6 +60,7 @@ function getManifest() {
 }
 
 async function getHome(ctx) {
+  ctx = normalizeRuntimeContext(ctx);
   let hero = [];
   try {
     hero = (await loadSectionItems(ctx, KBJFAN_SECTIONS[0], 1)).slice(0, 8);
@@ -87,6 +88,7 @@ async function getHome(ctx) {
 }
 
 async function getHomeSection(ctx) {
+  ctx = normalizeRuntimeContext(ctx);
   const section = findSection(ctx && (ctx.sectionId || ctx.id)) || KBJFAN_SECTIONS[0];
   try {
     return {
@@ -110,6 +112,7 @@ async function getHomeSection(ctx) {
 }
 
 async function getCategory(ctx) {
+  ctx = normalizeRuntimeContext(ctx);
   const section = findSection(ctx && (ctx.pageId || ctx.id || ctx.category || ctx.genreId)) || KBJFAN_SECTIONS[0];
   const page = positiveInt(contextValue(ctx, 'page'), 1);
   const html = await fetchText(ctx, categoryURL(ctx, section, page));
@@ -126,6 +129,7 @@ async function getCategory(ctx) {
 }
 
 async function getDetail(ctx) {
+  ctx = normalizeRuntimeContext(ctx);
   const detailURL = detailURLFromContext(ctx);
   if (!detailURL) throw new Error('KBJFan 详情参数无效');
   const html = await fetchText(ctx, detailURL);
@@ -149,6 +153,7 @@ async function getDetail(ctx) {
 }
 
 async function getResourceVersions(ctx) {
+  ctx = normalizeRuntimeContext(ctx);
   const detailURL = detailURLFromContext(ctx);
   if (!detailURL) return [];
   let videoURL = directMediaURLFromContext(ctx);
@@ -163,6 +168,7 @@ async function getResourceVersions(ctx) {
 }
 
 async function resolvePlayback(ctx) {
+  ctx = normalizeRuntimeContext(ctx);
   let detailURL = detailURLFromContext(ctx);
   let videoURL = directMediaURLFromContext(ctx);
   if (!videoURL && detailURL) {
@@ -182,6 +188,7 @@ async function resolvePlayback(ctx) {
 }
 
 async function search(ctx) {
+  ctx = normalizeRuntimeContext(ctx);
   const query = cleanText(contextValue(ctx, 'query') || contextValue(ctx, 'keyword') || contextValue(ctx, 'text'));
   const page = positiveInt(contextValue(ctx, 'page'), 1);
   if (!query) return { pageType: 'search', title: '搜索结果', keyword: '', page: page, hasMore: false, items: [] };
@@ -383,3 +390,16 @@ function escapeRegExp(value) { return stringValue(value).replace(/[.*+?^${}()|[\
 const KBJFAN_API = { getManifest, getHome, getHomeSection, getCategory, getDetail, getResourceVersions, resolvePlayback, search, onSearch, getSearch, play, getPlayback };
 if (typeof globalThis !== 'undefined') Object.keys(KBJFAN_API).forEach(function (key) { globalThis[key] = KBJFAN_API[key]; });
 if (typeof module !== 'undefined' && module.exports) module.exports = KBJFAN_API;
+
+function normalizeRuntimeContext(input) {
+  let ctx = input;
+  if (typeof ctx === 'string') { try { ctx = JSON.parse(ctx); } catch (_) { ctx = {}; } }
+  if (!ctx || typeof ctx !== 'object' || Array.isArray(ctx)) return {};
+  const nested = {};
+  ['params', 'config', 'settings', 'parameters', 'pagination', 'pageInfo'].forEach(function (key) {
+    let bag = ctx[key];
+    if (typeof bag === 'string') { try { bag = JSON.parse(bag); } catch (_) { bag = null; } }
+    if (bag && typeof bag === 'object' && !Array.isArray(bag)) Object.keys(bag).forEach(function (name) { if (nested[name] === undefined) nested[name] = bag[name]; });
+  });
+  return Object.assign(nested, ctx);
+}
