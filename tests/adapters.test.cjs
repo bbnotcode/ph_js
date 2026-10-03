@@ -656,3 +656,107 @@ test('JAVGG uses observed luluvdoo headers and does not invent headers for other
   const other=c.playbackHeaders('https://javstreamhq.xyz/e/film');
   assert.equal(other.Origin,undefined);assert.equal(other.Referer,undefined);
 });
+
+const sexDetailURL='https://sexbjcam.com/2026/09/30/sample/';
+const sexEmbedURL='https://player.test/embed/sample';
+const sexDetailHTML='<article itemtype="https://schema.org/VideoObject"><span itemprop="author"><meta itemprop="name" content="Uploader"></span><h1>Film title</h1><meta itemprop="embedUrl" content="'+sexEmbedURL+'"></article>';
+function packedSexPlayer(token='fresh') {
+  return `eval(function(p,a,c,k,e,d){return p;}('0="1://2.3/4.5?6=7";',36,8,'source|https|cdn|test|master|m3u8|token|${token}'.split('|'),0,{}))`;
+}
+
+test('SexBJCam reads the film title rather than nested uploader metadata', () => {
+  const c=load('sexbjcam-mini-library.js');
+  const detail=c.parseDetailHtml({},sexDetailHTML,sexDetailURL);
+  assert.equal(detail.title,'Film title');assert.equal(detail.embedURL,sexEmbedURL);
+});
+
+test('SexBJCam static packed playback avoids a hung browser and refreshes every selection', async () => {
+  const c=load('sexbjcam-mini-library.js');let browsers=0,players=0;const urls=[];
+  c.Widget.browser={async fetch(){browsers++;return new Promise(()=>{});}};
+  c.Widget.http.get=async (url,options)=>{urls.push(url);assert.equal(options.browserFallback,false);return {statusCode:200,data:url.includes('player.test')?packedSexPlayer('fresh'+(++players)):master};};
+  for(const [id,expected] of [[sexDetailURL,1080],['quality:720',720],['quality:1080',1080],['quality:540',1080]]) {
+    const result=await c.resolvePlayback(JSON.stringify({itemId:sexDetailURL,embedURL:sexEmbedURL,versionId:id}));
+    assert.equal(result.url,'https://cdn.test/'+expected+'.m3u8');
+  }
+  assert.equal(browsers,0);assert.equal(players,4);
+  assert.ok(urls.filter(x=>x.includes('cdn.test')).every(x=>!x.includes('_dreamby_refresh')));
+});
+
+test('SexBJCam hung native HTTP falls back once and preserves captured media headers', async () => {
+  const c=load('sexbjcam-mini-library.js',{setTimeout:(fn,ms)=>setTimeout(fn,ms/100)});let browsers=0;
+  c.Widget.http.get=async (url,options)=>{
+    if(url.includes('player.test'))return new Promise(()=>{});
+    assert.equal(options.headers.Referer,'https://actual-player.test/');return {status:200,data:master};
+  };
+  c.Widget.browser={async fetch(url,options){browsers++;assert.ok(options.timeout<=12);assert.equal(options.waitForAny,undefined);return {capturedRequests:[{url:'https://cdn.test/master.m3u8?token=device',requestHeaders:{referer:'https://actual-player.test/',origin:'https://actual-player.test','user-agent':'Device Agent',cookie:'fixture-cookie',Authorization:'must-not-copy'}}]};}};
+  const result=await c.resolvePlayback({itemId:sexDetailURL,embedURL:sexEmbedURL,versionId:'quality:720'});
+  assert.equal(result.url,'https://cdn.test/720.m3u8');assert.equal(browsers,1);
+  assert.deepEqual(plain(result.headers),{'User-Agent':'Device Agent',Referer:'https://actual-player.test/',Origin:'https://actual-player.test',Cookie:'fixture-cookie'});
+});
+
+test('SexBJCam hung native browser reports its own stage instead of the overall deadline', async () => {
+  const c=load('sexbjcam-mini-library.js',{setTimeout:(fn,ms)=>setTimeout(fn,ms/100)});let browsers=0;
+  c.Widget.http.get=async()=>({statusCode:503,data:'unavailable'});
+  c.Widget.browser={async fetch(){browsers++;return new Promise(()=>{});}};
+  const start=Date.now();await assert.rejects(c.resolvePlayback({embedURL:sexEmbedURL}),/browser-media-timeout/);
+  assert.equal(browsers,1);assert.ok(Date.now()-start<500);
+});
+
+test('SexBJCam stalled quality probe preserves a fresh media URL but creates no fake resource', async () => {
+  const c=load('sexbjcam-mini-library.js',{setTimeout:(fn,ms)=>setTimeout(fn,ms/100)});
+  c.Widget.http.get=async url=>url.includes('/2026/')?{status:200,data:sexDetailHTML}:url.includes('player.test')?{status:200,data:packedSexPlayer()}:new Promise(()=>{});
+  const result=await c.resolvePlayback({itemId:sexDetailURL,embedURL:sexEmbedURL});
+  assert.equal(result.url,'https://cdn.test/master.m3u8?token=fresh');
+  const detail=await c.getDetail({itemId:sexDetailURL});assert.equal(detail.resourceGroups.length,0);
+  await assert.rejects(c.getResourceVersions({itemId:sexDetailURL,embedURL:sexEmbedURL}),/manifest-http-timeout/);
+});
+
+test('SexBJCam variant-only capture keeps its URL and exposes honest original HLS quality', async () => {
+  const c=load('sexbjcam-mini-library.js');const variant='https://cdn.test/index-f3-v1-a1.m3u8?token=exact';
+  c.Widget.http.get=async url=>url.includes('player.test')?{status:200,data:'dynamic player'}:{status:200,data:media};
+  c.Widget.browser={async fetch(){return {capturedRequests:[{url:variant,requestHeaders:{Referer:'https://actual-player.test/'}}]};}};
+  assert.equal(c.mediaURLFromBrowserResult({capturedRequests:[{url:variant}]}),variant);
+  const groups=await c.getResourceVersions({itemId:sexDetailURL,embedURL:sexEmbedURL});
+  assert.equal(groups.groups[0].versions[0].name,'HLS 原始画质');assert.equal(groups.groups[0].versions[0].id,'quality:original');
+  const result=await c.resolvePlayback(groups.groups[0].versions[0].action);assert.equal(result.url,variant);
+});
+
+test('SexBJCam metadata cache never stores signed URLs or media request credentials', async () => {
+  const c=load('sexbjcam-mini-library.js');const stored=[];
+  c.Widget.storage={get(){return null},set(key,value){stored.push(value)}};
+  c.Widget.http.get=async url=>url.includes('player.test')?{status:200,data:'dynamic player'}:{status:200,data:master};
+  c.Widget.browser={async fetch(){return {capturedRequests:[{url:'https://cdn.test/master.m3u8?token=ephemeral',requestHeaders:{Cookie:'private-fixture',Origin:'https://actual-player.test'}}]};}};
+  const groups=await c.getResourceVersions({itemId:sexDetailURL,embedURL:sexEmbedURL});
+  assert.deepEqual(plain(groups.groups[0].versions.map(x=>x.name)),['1080P','720P']);
+  const serialized=JSON.stringify(stored)+JSON.stringify(groups);
+  assert.ok(!serialized.includes('ephemeral'));assert.ok(!serialized.includes('private-fixture'));
+});
+
+test('SexBJCam rejects permanent manifest errors and can retry the same item after recovery', async () => {
+  const c=load('sexbjcam-mini-library.js');let status=404;
+  c.Widget.http.get=async url=>url.includes('player.test')?{status:200,data:packedSexPlayer()}:{statusCode:status,data:status===200?master:'Not Found'};
+  const ctx={itemId:sexDetailURL,embedURL:sexEmbedURL};
+  await assert.rejects(c.resolvePlayback(ctx),/manifest-http-404/);
+  await assert.rejects(c.getResourceVersions(ctx),/manifest-http-404/);
+  status=200;assert.equal((await c.getResourceVersions(ctx)).groups[0].versions[0].name,'1080P');
+});
+
+test('SexBJCam browser failures distinguish blob-only results without leaking response values', async () => {
+  const c=load('sexbjcam-mini-library.js');c.Widget.http.get=async()=>({status:200,data:'dynamic'});
+  c.Widget.browser={async fetch(){return {mediaSources:['blob:https://player.test/id'],secret:'must-not-leak'};}};
+  await assert.rejects(c.resolvePlayback({embedURL:sexEmbedURL}),error=>/browser-blob-only/.test(error.message)&&!error.message.includes('must-not-leak'));
+});
+
+for(const [entry,operation,label] of [['getDetail','getDetailWithinBudget','详情加载'],['getResourceVersions','getResourceVersionsWithinBudget','画质发现']]) {
+  test(`SexBJCam ${entry} has an overall deadline`,async()=>{
+    const c=load('sexbjcam-mini-library.js',{setTimeout:fn=>setTimeout(fn,15)});c[operation]=async()=>new Promise(()=>{});
+    await assert.rejects(c[entry]({}),new RegExp(label+'超时.*total-deadline'));
+  });
+}
+
+test('SexBJCam rejects an empty HLS response rather than returning a fake playable URL', async () => {
+  const c=load('sexbjcam-mini-library.js');
+  c.Widget.http.get=async url=>({status:200,data:url.includes('player.test')?packedSexPlayer():'#EXTM3U\n'});
+  await assert.rejects(c.resolvePlayback({embedURL:sexEmbedURL}),/manifest-empty/);
+  await assert.rejects(c.getResourceVersions({itemId:sexDetailURL,embedURL:sexEmbedURL}),/manifest-empty/);
+});

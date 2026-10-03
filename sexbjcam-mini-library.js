@@ -9,7 +9,7 @@ const WidgetMetadata = {
   id: 'sexbjcam-mini-library',
   name: 'SexBJCam',
   title: 'SexBJCam',
-  version: '1.1.8',
+  version: '1.1.9',
   author: 'Alan huang',
   logo: SEXBJCAM_LOGO,
   icon: SEXBJCAM_LOGO,
@@ -111,7 +111,7 @@ async function getCategory(rawCtx) {
   };
 }
 
-async function getDetail(rawCtx) {
+async function getDetailWithinBudget(rawCtx) {
   const ctx = normalizeContext(rawCtx);
   const detailURL = detailURLFromContext(ctx);
   if (!detailURL) throw new Error('SexBJCam 详情参数无效');
@@ -119,17 +119,14 @@ async function getDetail(rawCtx) {
   const detail = parseDetailHtml(ctx, html, detailURL);
   const related = parseListHtml(ctx, html).filter(function (item) { return item.id !== detailURL; }).slice(0, 18);
   let qualityVersions = [];
-  let qualityDiscoveryFailed = false;
   if (detail.embedURL) {
     try {
       qualityVersions = await loadQualityVersions(ctx, detailURL, detail.title, detail.embedURL);
-    } catch (_) {
-      qualityDiscoveryFailed = true;
-    }
+    } catch (_) { /* Dynamic resource loading can retry; do not cache a fake default line. */ }
   }
   const resourceGroups = qualityVersions.length
     ? [{ id: 'quality', title: '画质', versions: qualityVersions }]
-    : (qualityDiscoveryFailed ? [] : resourceGroupsFor(ctx, detailURL, detail.title, detail.embedURL));
+    : [];
   return {
     pageType: 'detail', id: detailURL, type: 'movie', title: detail.title,
     poster: detail.poster, backdrop: detail.poster, detailImageAspectRatio: '16:9',
@@ -148,7 +145,7 @@ async function getDetail(rawCtx) {
   };
 }
 
-async function getResourceVersions(rawCtx) {
+async function getResourceVersionsWithinBudget(rawCtx) {
   const ctx = normalizeContext(rawCtx);
   const detailURL = detailURLFromContext(ctx);
   if (!detailURL) return { itemId: '', groups: [] };
@@ -159,14 +156,11 @@ async function getResourceVersions(rawCtx) {
     embedURL = detail.embedURL;
     title = detail.title || title;
   }
-  let versions = [];
-  if (embedURL) {
-    versions = await loadQualityVersions(ctx, detailURL, title, embedURL);
-  }
+  if (!embedURL) throw stageError('detail-player', '没有解析到 SexBJCam 播放器地址');
+  const versions = await loadQualityVersions(ctx, detailURL, title, embedURL);
   return {
     itemId: detailURL,
-    groups: versions.length ? [{ id: 'quality', title: '画质', versions: versions }] :
-      resourceGroupsFor(ctx, detailURL, title, embedURL)
+    groups: versions.length ? [{ id: 'quality', title: '画质', versions: versions }] : []
   };
 }
 
@@ -182,8 +176,7 @@ async function resolvePlaybackWithinBudget(rawCtx) {
   const html = await fetchPlayerText(ctx, embedURL);
   const masterURL = extractMediaURL(html, embedURL);
   if (!masterURL) throw new Error('没有解析到 SexBJCam HLS 地址');
-  const origin = urlOrigin(embedURL);
-  const headers = { Referer: embedURL, Origin: origin, 'User-Agent': SEXBJCAM_UA };
+  const headers = ctx.__mediaHeaders || minimalMediaHeaders();
   const quality = qualityFromContext(ctx);
   let mediaURL = masterURL;
   if (/\.m3u8(?:$|[?#])/i.test(masterURL)) {
@@ -192,7 +185,10 @@ async function resolvePlaybackWithinBudget(rawCtx) {
       const variants = parseHlsVariants(manifest, masterURL);
       const selected = selectVariant(variants, quality);
       if (selected && selected.url) mediaURL = selected.url;
-    } catch (_) {}
+    } catch (error) {
+      if (/-4\d\d$|verification$|not-hls$|manifest-empty$/.test(error.stage || '')) throw error;
+      // A fresh real URL can still be handed off after a transient quality-probe failure.
+    }
   }
   return {
     url: mediaURL, container: mediaContainer(mediaURL),
@@ -263,8 +259,8 @@ function parseListHtml(ctx, html) {
 function parseDetailHtml(ctx, html, detailURL) {
   const article = firstMatch(html, /(<article\b[^>]*\bitemprop=["']video["'][^>]*>[\s\S]*?<\/article>)/i)[0] || String(html || '');
   const title = cleanText(firstNonEmpty(
-    metaItemContent(article, 'name'), metaContent(html, 'property', 'og:title'),
     firstMatch(article, /<h1\b[^>]*>([\s\S]*?)<\/h1>/i)[0],
+    metaContent(html, 'property', 'og:title'), metaItemContent(article, 'name'),
     firstMatch(html, /<title\b[^>]*>([\s\S]*?)<\/title>/i)[0]
   )).replace(/\s*[–|-]\s*sexbjcam\s*$/i, '');
   const poster = absoluteURL(ctx, firstNonEmpty(
@@ -292,52 +288,32 @@ function parseDetailHtml(ctx, html, detailURL) {
   };
 }
 
-function resourceGroupsFor(ctx, detailURL, title, embedURL) {
-  return [{
-    id: 'online', title: '在线播放',
-    versions: [{
-      id: detailURL, name: '默认线路', title: title || '默认线路',
-      subtitle: '动态解析 HLS', container: 'm3u8', default: true,
-      action: {
-        type: 'play', itemId: detailURL, versionId: detailURL,
-        embedURL: embedURL || undefined, title: title || '默认线路'
-      }
-    }]
-  }];
-}
-
 async function loadQualityVersions(ctx, detailURL, title, embedURL) {
   let variants = [];
-  let lastError = null;
-  let manifestResolved = false;
-  let headers = { Referer: embedURL, Origin: urlOrigin(embedURL), 'User-Agent': SEXBJCAM_UA };
-  for (let attempt = 0; attempt < 3 && !variants.length; attempt += 1) {
-    try {
-      const playerHTML = await fetchPlayerText(ctx, embedURL);
-      const masterURL = extractMediaURL(playerHTML, embedURL);
-      if (!masterURL) throw new Error('播放器没有返回 HLS 地址');
-      const manifest = await fetchSignedManifestText(ctx, masterURL, headers);
-      if (!/^\s*#EXTM3U/i.test(manifest)) throw new Error('播放器没有返回有效 HLS 清单');
-      manifestResolved = true;
-      variants = parseHlsVariants(manifest, masterURL);
-    } catch (error) {
-      lastError = error;
-      variants = [];
-    }
-  }
-  if (variants.length) {
-    writeQualityMetadata(embedURL, variants.map(function (variant) {
+  let original = false;
+  try {
+    const playerHTML = await fetchPlayerText(ctx, embedURL);
+    const masterURL = extractMediaURL(playerHTML, embedURL);
+    if (!masterURL) throw stageError('player-media', '播放器没有返回 HLS 地址');
+    const headers = ctx.__mediaHeaders || minimalMediaHeaders();
+    const manifest = await fetchSignedManifestText(ctx, masterURL, headers);
+    variants = parseHlsVariants(manifest, masterURL);
+    original = !variants.length && /#EXTINF|#EXT-X-STREAM-INF/i.test(manifest);
+    if (!variants.length && !original) throw stageError('manifest-empty', 'HLS 清单没有媒体条目');
+    if (variants.length) writeQualityMetadata(embedURL, variants.map(function (variant) {
       return { height: variant.height, bandwidth: variant.bandwidth || 0 };
     }));
-  } else {
-    variants = readQualityMetadata(embedURL);
+  } catch (error) {
+    // Previously proven resolution metadata is a fallback, never a cached signed URL.
+    if (!/-4\d\d$|verification$|not-hls$|manifest-empty$/.test(error.stage || '')) variants = readQualityMetadata(embedURL);
+    if (!variants.length) throw stageError(error.stage || 'quality-discovery', '画质加载失败，请检查网络后重新打开资源列表');
   }
-  if (!variants.length && !manifestResolved) {
-    const reason = lastError && lastError.message ? '：' + lastError.message : '';
-    throw new Error('画质加载失败，请检查网络后重新打开资源列表' + reason);
-  }
-  if (!variants.length) return [];
-  return buildQualityVersions(detailURL, title, embedURL, headers, variants);
+  if (original) return [{
+    id: 'quality:original', name: 'HLS 原始画质', title: 'HLS 原始画质',
+    subtitle: '源站返回原始 HLS · 播放时刷新地址', container: 'm3u8', default: true,
+    action: { type: 'play', itemId: detailURL, versionId: 'quality:original', embedURL: embedURL, title: title }
+  }];
+  return buildQualityVersions(detailURL, title, embedURL, variants);
 }
 
 function readQualityMetadata(embedURL) {
@@ -407,7 +383,7 @@ function qualityCacheKey(embedURL) {
   return 'sexbjcam:qualities:v1:' + (hash >>> 0).toString(16);
 }
 
-function buildQualityVersions(detailURL, title, embedURL, headers, variants) {
+function buildQualityVersions(detailURL, title, embedURL, variants) {
   return variants.map(function (variant, index) {
     const qualityId = 'quality:' + variant.height;
     return {
@@ -420,7 +396,6 @@ function buildQualityVersions(detailURL, title, embedURL, headers, variants) {
       quality: variant.height + 'P',
       container: 'm3u8',
       default: index === 0,
-      headers: headers,
       action: {
         type: 'play', itemId: detailURL, versionId: qualityId,
         quality: variant.height, embedURL: embedURL, title: title || variant.height + 'P'
@@ -460,9 +435,7 @@ function selectVariant(variants, requestedHeight) {
   if (!variants || !variants.length) return null;
   if (!requestedHeight) return variants[0];
   for (let i = 0; i < variants.length; i += 1) if (variants[i].height === requestedHeight) return variants[i];
-  return variants.reduce(function (best, item) {
-    return Math.abs(item.height - requestedHeight) < Math.abs(best.height - requestedHeight) ? item : best;
-  }, variants[0]);
+  return variants[0];
 }
 
 function qualityFromContext(ctx) {
@@ -470,7 +443,7 @@ function qualityFromContext(ctx) {
     contextValue(ctx, 'quality'), contextValue(ctx, 'height'),
     contextValue(ctx, 'versionId'), contextValue(ctx, 'version')
   );
-  const match = /(?:quality:)?(\d{3,4})p?/i.exec(raw);
+  const match = /^(?:quality:)?(\d{3,4})p?$/i.exec(raw);
   return match ? Number(match[1]) : 0;
 }
 
@@ -500,68 +473,96 @@ async function loadSectionItems(ctx, section, page) {
   return parseListHtml(ctx, html);
 }
 
-async function fetchText(ctx, url, headers) {
-  const response = await httpRequest(url, headers || requestHeaders(ctx, url), remainingPlaybackSeconds(ctx, 6));
-  const text = unwrapText(response);
-  if (!text) throw new Error('请求失败: ' + url);
-  return text;
+async function fetchText(ctx, url, headers, limit, stage) {
+  const seconds = remainingPlaybackSeconds(ctx, limit || 6);
+  return runStage(ctx, stage || 'http', seconds, async function () {
+    let response;
+    try { response = await httpRequest(url, headers || requestHeaders(ctx, url), seconds); }
+    catch (_) { throw stageError(stage || 'http', '来源请求失败'); }
+    const text = await unwrapText(response);
+    const status = Number(response && (response.status || response.statusCode));
+    if (status >= 400) throw stageError((stage || 'http') + '-' + status, '来源请求失败（HTTP ' + status + '）');
+    if (isVerificationPage(text)) throw stageError((stage || 'http') + '-verification', '源站要求浏览器验证');
+    if (!text) throw stageError((stage || 'http') + '-empty', '来源返回空内容');
+    return text;
+  });
 }
 
 async function fetchPlayerText(ctx, url) {
   const referer = detailURLFromContext(ctx) || baseURL(ctx) + '/';
-  const freshHeaders = {
-    Referer: referer,
-    'User-Agent': SEXBJCAM_UA,
+  const headers = {
+    Referer: referer, 'User-Agent': SEXBJCAM_UA,
     Accept: 'text/html,application/xhtml+xml',
-    'Cache-Control': 'no-cache, no-store, max-age=0',
-    Pragma: 'no-cache'
+    'Cache-Control': 'no-cache, no-store, max-age=0', Pragma: 'no-cache'
   };
-  const widget = typeof Widget !== 'undefined' ? Widget : null;
-  if (widget && widget.browser && typeof widget.browser.fetch === 'function') {
-    try {
-      const result = await widget.browser.fetch(cacheBustedURL(url), {
-        visible: false,
-        timeout: playbackBrowserSeconds(ctx, 12, 2),
-        timeoutSeconds: remainingPlaybackSeconds(ctx, 12),
-        waitAfterLoad: 3,
-        waitForAny: true,
-        waitForMediaSource: true,
-        headers: freshHeaders
-      });
-      const browserText = unwrapText(result);
-      if (browserText && extractMediaURL(browserText, url)) return browserText;
-      const mediaURL = mediaURLFromBrowserResult(result);
-      if (mediaURL) return mediaURL;
-    } catch (_) {}
-  }
-  let normalError = null;
+  let lastError;
   try {
-    const text = await fetchText(ctx, cacheBustedURL(url), freshHeaders);
-    if (extractMediaURL(text, url)) return text;
-    normalError = new Error('播放器页面未包含媒体配置');
-  } catch (error) {
-    normalError = error;
-  }
-  throw normalError || new Error('播放器页面请求失败');
+    const text = await fetchText(ctx, cacheBustedURL(url), headers, 6, 'player-http');
+    if (extractMediaURL(text, url)) {
+      ctx.__mediaHeaders = minimalMediaHeaders();
+      return text;
+    }
+    lastError = stageError('player-media', '播放器页面未包含媒体配置');
+  } catch (error) { lastError = error; }
+  const widget = typeof Widget !== 'undefined' ? Widget : null;
+  if (!widget || !widget.browser || typeof widget.browser.fetch !== 'function') throw lastError;
+  const seconds = playbackBrowserSeconds(ctx, 12, 1);
+  return runStage(ctx, 'browser-media', seconds, async function () {
+    let result;
+    try {
+      result = await widget.browser.fetch(cacheBustedURL(url), {
+        visible: false, timeout: seconds, timeoutSeconds: seconds,
+        waitAfterLoad: 1, waitForMediaSource: true, headers: headers
+      });
+    } catch (_) { throw stageError('browser-media', '浏览器媒体捕获失败'); }
+    const browserText = await unwrapText(result);
+    const capturedURL = mediaURLFromBrowserResult(result);
+    const explicitURL = extractMediaURL(browserText, url);
+    const mediaURL = /\/master\.m3u8(?:$|[?#])/i.test(capturedURL) ? capturedURL : (explicitURL || capturedURL);
+    if (mediaURL) {
+      ctx.__mediaHeaders = capturedMediaHeaders(result, mediaURL) || minimalMediaHeaders();
+      return mediaURL;
+    }
+    const keys = Object.keys(result || {}).slice(0, 12).join(',');
+    const blobOnly = /blob:https?:/.test(JSON.stringify(result && (result.mediaSources || result.capturedRequests || result.mediaRequests) || []));
+    const stage = isVerificationPage(browserText) ? 'browser-verification' : (blobOnly ? 'browser-blob-only' : 'browser-no-media');
+    throw stageError(stage, '浏览器未回传可用媒体；blobOnly=' + blobOnly + '；keys=' + keys);
+  });
 }
 
 async function fetchSignedManifestText(ctx, url, headers) {
-  const widget = typeof Widget !== 'undefined' ? Widget : null;
-  if (widget && widget.browser && typeof widget.browser.fetch === 'function') {
-    try {
-      const result = await widget.browser.fetch(url, {
-        visible: false,
-        timeout: playbackBrowserSeconds(ctx, 6, 2),
-        timeoutSeconds: remainingPlaybackSeconds(ctx, 6),
-        waitAfterLoad: 1,
-        waitForAny: true,
-        headers: headers
-      });
-      const browserText = unwrapText(result);
-      if (/^\s*#EXTM3U/i.test(browserText)) return browserText;
-    } catch (_) {}
+  // Navigating a browser to a signed playlist is not a reliable text fetch.
+  const text = await fetchText(ctx, url, headers, 4, 'manifest-http');
+  if (!/^\s*#EXTM3U/i.test(text)) throw stageError('manifest-not-hls', '来源未返回 HLS 清单');
+  if (!/#EXTINF|#EXT-X-STREAM-INF/i.test(text)) throw stageError('manifest-empty', 'HLS 清单没有媒体条目');
+  return text;
+}
+
+function capturedMediaHeaders(result, url) {
+  const arrays = [result && result.capturedRequests, result && result.mediaRequests, result && result.requests];
+  for (let a = 0; a < arrays.length; a += 1) {
+    if (!Array.isArray(arrays[a])) continue;
+    const request = arrays[a].find(function (item) { return item && item.url === url; });
+    const input = request && (request.requestHeaders || request.headers);
+    if (!input || typeof input !== 'object') continue;
+    const headers = { 'User-Agent': SEXBJCAM_UA };
+    Object.keys(input).forEach(function (key) {
+      const canonical = { 'user-agent': 'User-Agent', referer: 'Referer', origin: 'Origin', cookie: 'Cookie' }[key.toLowerCase()];
+      if (canonical) headers[canonical] = String(input[key]);
+    });
+    return headers;
   }
-  return fetchText(ctx, url, headers);
+  return null;
+}
+
+function minimalMediaHeaders() {
+  const headers = { 'User-Agent': SEXBJCAM_UA };
+  // The verified static CDN flow works with this User-Agent; captured requests carry their own headers.
+  return headers;
+}
+
+function isVerificationPage(text) {
+  return /Just a moment|Checking (?:your )?browser|cf-browser-verification|cf-chl-/i.test(String(text || '').slice(0, 30000));
 }
 
 function mediaURLFromBrowserResult(result) {
@@ -572,7 +573,7 @@ function mediaURLFromBrowserResult(result) {
     const direct = stringValue(result[directKeys[i]]);
     if (isMediaURL(direct) && !/^blob:/i.test(direct)) candidates.push(direct);
   }
-  const arrays = [result.mediaSources, result.mediaRequests, result.requests, result.responses, result.urls];
+  const arrays = [result.capturedRequests, result.mediaSources, result.mediaRequests, result.requests, result.responses, result.urls];
   for (let a = 0; a < arrays.length; a += 1) {
     const values = arrays[a];
     if (!Array.isArray(values)) continue;
@@ -586,17 +587,7 @@ function mediaURLFromBrowserResult(result) {
     }
   }
   for (let i = 0; i < candidates.length; i += 1) if (/\/master\.m3u8(?:$|[?#])/i.test(candidates[i])) return candidates[i];
-  for (let i = 0; i < candidates.length; i += 1) {
-    const masterURL = masterURLFromVariant(candidates[i]);
-    if (masterURL) return masterURL;
-  }
   return candidates[0] || '';
-}
-
-function masterURLFromVariant(url) {
-  const value = stringValue(url);
-  if (!/\/index-[^/?#]+\.m3u8(?:$|[?#])/i.test(value)) return '';
-  return value.replace(/\/index-[^/?#]+\.m3u8(?=[$?#])/i, '/master.m3u8');
 }
 
 function cacheBustedURL(url) {
@@ -610,8 +601,9 @@ async function httpRequest(url, headers, timeout = 6) {
   const dollar = typeof $http !== 'undefined' ? $http : null;
   const client = (widget && widget.http) || dollar;
   if (!client) throw new Error('当前环境没有可用的 HTTP 客户端');
-  if (typeof client.get === 'function') return client.get(url, { headers: headers, timeout, timeoutSeconds: timeout });
-  if (typeof client.request === 'function') return client.request({ url: url, method: 'GET', headers: headers, timeout, timeoutSeconds: timeout });
+  const options = { headers: headers, timeout: timeout, timeoutSeconds: timeout, useBrowserFallback: false, browserFallback: false, useBrowserCookie: true, attachBrowserCookie: true };
+  if (typeof client.get === 'function') return client.get(url, options);
+  if (typeof client.request === 'function') return client.request(Object.assign({ url: url, method: 'GET' }, options));
   throw new Error('当前 HTTP 客户端不支持 GET');
 }
 
@@ -820,16 +812,32 @@ const SEXBJCAM_API = {
 if (typeof globalThis !== 'undefined') Object.keys(SEXBJCAM_API).forEach(function (key) { globalThis[key] = SEXBJCAM_API[key]; });
 if (typeof module !== 'undefined' && module.exports) module.exports = SEXBJCAM_API;
 
-async function withPlaybackBudget(input, operation) {
-  let ctx = input;
-  if (typeof ctx === 'string') { try { ctx = JSON.parse(ctx); } catch (_) { ctx = {}; } }
-  ctx = Object.assign({}, ctx && typeof ctx === 'object' ? ctx : {});
+function stageError(stage, message) {
+  const error = new Error(message + '；stage=' + stage);
+  error.stage = stage;
+  return error;
+}
+
+async function runStage(ctx, stage, seconds, operation) {
+  const budget = ctx && ctx.__playbackBudget;
+  if (budget && budget.expired) throw stageError('total-deadline', '解析超时');
+  let timer;
+  try {
+    const timeout = new Promise(function (_, reject) {
+      timer = setTimeout(function () { reject(stageError(stage + '-timeout', '来源请求超时')); }, seconds * 1000);
+    });
+    return await Promise.race([Promise.resolve().then(operation), timeout]);
+  } finally { clearTimeout(timer); }
+}
+
+async function withPlaybackBudget(input, operation, label) {
+  const ctx = Object.assign({}, normalizeContext(input));
   const budget = { endAt: Date.now() + 28000, expired: false, browserCalls: 0 };
   ctx.__playbackBudget = budget;
   let timer;
   try {
     const timeout = new Promise(function (_, reject) {
-      timer = setTimeout(function () { budget.expired = true; reject(new Error('播放解析超时；stage=total-deadline；请稍后重试')); }, 28000);
+      timer = setTimeout(function () { budget.expired = true; reject(stageError('total-deadline', (label || '播放解析') + '超时；请稍后重试')); }, 28000);
     });
     return await Promise.race([Promise.resolve().then(function () { return operation(ctx); }), timeout]);
   } finally { clearTimeout(timer); budget.expired = true; }
@@ -853,4 +861,12 @@ function playbackBrowserSeconds(ctx, limit, maxCalls) {
 
 async function resolvePlayback(input) {
   return withPlaybackBudget(input, resolvePlaybackWithinBudget);
+}
+
+async function getDetail(input) {
+  return withPlaybackBudget(input, getDetailWithinBudget, '详情加载');
+}
+
+async function getResourceVersions(input) {
+  return withPlaybackBudget(input, getResourceVersionsWithinBudget, '画质发现');
 }
