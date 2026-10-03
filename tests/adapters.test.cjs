@@ -245,6 +245,74 @@ test('ASMRLIB category previews come from their own category and load after home
   const section = await c.getHomeSection({ sectionId: 'categories' }); assert.ok(requested.length >= 3);
   assert.ok(section.items.every(x => x.previewItems[0].id.startsWith(x.action.pageId + '-')));
 });
+const asmrPost = 'becd2651e7d56ca656d27766d036dcee';
+const asmrCurrentPage = '<html><h1>ASMR sample</h1><div id="players"><button data-url="https://bysetayico.com/e/current">BI</button><button data-url="https://abyssplayer.com/current">AB</button></div><div id="downloads"></div></html>';
+test('ASMRLIB current embedded players expose one interactive page action consistently', async () => {
+  const c = load('asmrlib-mini-library.js');
+  c.Widget.http.get = async () => ({ status: 200, data: asmrCurrentPage });
+  const input = { itemId: 'asmrlib://post/' + asmrPost };
+  const detail = await c.getDetail(input), groups = await c.getResourceVersions(input);
+  assert.deepEqual(plain(groups), plain(detail.resourceGroups));
+  const versions = groups[0].versions;
+  assert.equal(versions.length, 1); assert.equal(versions[0].default, true);
+  assert.equal(versions[0].action.itemId, input.itemId);
+  assert.equal(c.asmrId(versions[0].action.versionId), asmrPost);
+  assert.match(versions[0].subtitle, /验证或播放/);
+});
+for (const player of ['https://bysetayico.com/e/old', 'https://abyssplayer.com/old']) {
+  test(`ASMRLIB legacy ${new URL(player).host} action preserves the original embedding page`, async () => {
+    const c = load('asmrlib-mini-library.js'); const calls = []; let http = 0;
+    c.Widget.http.get = async () => { http++; throw new Error('unnecessary detail refresh'); };
+    c.Widget.browser = { async fetch(url, options) { calls.push({ url, options }); return { mediaSources: [{ url: 'https://cdn.test/main.m3u8', requestHeaders: { referer: player, origin: new URL(player).origin } }] }; } };
+    const input = { itemId: 'asmrlib://post/' + asmrPost, versionId: 'asmrlib-line://old/' + encodeURIComponent(player) };
+    const result = await c.resolvePlayback(JSON.stringify(input));
+    assert.equal(result.url, 'https://cdn.test/main.m3u8'); assert.equal(result.container, 'm3u8');
+    assert.equal(calls.length, 1); assert.equal(http, 0);
+    assert.equal(calls[0].url, 'https://asmrlib.com/posts/' + asmrPost); assert.equal(calls[0].options.visible, true);
+    assert.equal(calls[0].options.waitForMediaSource, true);
+    assert.equal(calls[0].options.captureRequests, undefined); assert.equal(calls[0].options.captureMedia, undefined);
+    assert.equal(result.headers.Referer, player); assert.equal(result.headers.Origin, new URL(player).origin);
+  });
+}
+test('ASMRLIB page-version-only input uses captured media headers and not outer document headers', async () => {
+  const c = load('asmrlib-mini-library.js');
+  c.Widget.browser = { async fetch() { return { headers: { Origin: 'https://outer.test' }, capturedRequests: [{ url: 'https://cdn.test/final.mp4', headers: { Referer: 'https://player.test/', Origin: 'https://player.test', Cookie: 'verified=sample', Connection: 'keep-alive' } }] }; } };
+  const result = await c.resolvePlayback({ versionId: 'asmrlib-page://post/' + asmrPost });
+  assert.equal(result.url, 'https://cdn.test/final.mp4'); assert.equal(result.headers.Origin, 'https://player.test');
+  assert.equal(result.headers.Cookie, 'verified=sample'); assert.equal(result.headers.Connection, undefined);
+});
+test('ASMRLIB refuses blob-only results and records capability evidence without retrying players', async () => {
+  const c = load('asmrlib-mini-library.js'); let calls = 0;
+  c.Widget.browser = { async fetch() { calls++; return { html: '<video src="blob:https://player.test/id"></video>', mediaSources: [{ url: 'blob:https://player.test/id' }] }; } };
+  await assert.rejects(c.resolvePlayback({ itemId: asmrPost }), error => /stage=page-media/.test(error.message) && /blobOnly=true/.test(error.message) && /keys=html,mediaSources/.test(error.message));
+  assert.equal(calls, 1);
+});
+test('ASMRLIB honors hidden-page preference and reports manual verification requirements', async () => {
+  const c = load('asmrlib-mini-library.js'); let visible;
+  c.Widget.browser = { async fetch(url, options) { visible = options.visible; return { html: '<p>点击播放按钮以验证你是真人</p>' }; } };
+  await assert.rejects(c.resolvePlayback({ itemId: asmrPost, params: { browserVisible: false } }), /stage=verification-required/);
+  assert.equal(visible, false); assert.equal(c.getManifest().parameters[0].defaultValue, true);
+});
+test('ASMRLIB bounds a hung host browser and preserves the stage without exposing native exceptions', async () => {
+  const c = load('asmrlib-mini-library.js', { setTimeout: (fn, ms) => setTimeout(fn, ms / 100) }); let calls = 0;
+  c.Widget.browser = { async fetch() { calls++; return new Promise(() => {}); } };
+  await assert.rejects(c.resolvePlayback({ itemId: asmrPost }), /stage=page-media/); assert.equal(calls, 1);
+  c.Widget.browser.fetch = async () => { throw new Error('Cookie=session-secret https://cdn.test/?token=secret'); };
+  await assert.rejects(c.resolvePlayback({ itemId: asmrPost }), error => /stage=page-media/.test(error.message) && !/secret/.test(error.message));
+});
+test('ASMRLIB old UP failure falls back once to the embedded page instead of skipping browser capture', async () => {
+  const c = load('asmrlib-mini-library.js', { $crypto: { aesDecrypt() { throw new Error('unsupported AES'); } } }); let browser = 0, timeout;
+  c.Widget.http.get = async (url, options) => { timeout = options.timeout; return { data: 'abcdef123456' }; };
+  c.Widget.browser = { async fetch(url) { browser++; assert.equal(url, 'https://asmrlib.com/posts/' + asmrPost); return { mediaURL: 'https://cdn.test/current.mp4' }; } };
+  const versionId = 'asmrlib-line://UP/' + encodeURIComponent('https://v.upn.one/#legacycode');
+  const result = await c.resolvePlayback({ itemId: asmrPost, versionId });
+  assert.equal(result.url, 'https://cdn.test/current.mp4'); assert.equal(browser, 1); assert.equal(timeout, 5);
+  assert.equal(result.headers.Origin, undefined); assert.equal(result.headers.Referer, undefined);
+});
+test('ASMRLIB retains direct media compatibility without requiring a browser', async () => {
+  const c = load('asmrlib-mini-library.js');
+  assert.equal((await c.resolvePlayback({ url: 'https://cdn.test/legacy.mp4' })).url, 'https://cdn.test/legacy.mp4');
+});
 test('Jable Forward adds sorting and page parameters once', async () => {
   const c = load('jable.js'); let captured;
   c.Widget.http.get = async url => { captured = new URL(url); throw new Error('fixture stop'); };
