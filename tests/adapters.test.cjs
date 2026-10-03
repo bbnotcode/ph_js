@@ -257,3 +257,137 @@ test('XVideos attaches the configured session token without printing it', async 
   const options=await vm.runInContext('widgetAPI.getDefaultOptions()',c);
   assert.equal(options.headers.Cookie,'session_token='+token); assert.ok(logs.every(line=>!line.includes(token)));
 });
+
+const madouCard = id => `<div class="streamit-video-card rounded-3" data-preview="https://img.test/preview.mp4"><a href="/asian/zh-CN/video/cid/${id}"><img src="https://img.test/${id}.jpg" alt="${id}"></a></div>`;
+const taoluPage = (id, source, preview = true) => `<h1>Film ${id}</h1><video id="player"></video>${preview ? '正在播放预览，VIP可免费观看完整视频' : ''}<script>const video_id = '${id}'; document.addEventListener('DOMContentLoaded', () => { const source = '${source}'; });</script><video data-src="https://img.test/snapshots/999.mp4"></video>`;
+
+test('KBJ unavailable home reports the source failure instead of successful empty media', async () => {
+  const c = load('kbjfan-mini-library.js'); c.Widget.http.get = async () => { throw new Error('connection closed'); };
+  await assert.rejects(c.getHome({}), /KBJFan 加载失败.*connection closed/);
+  const section = await c.getHomeSection({ sectionId: 'dance' }); assert.equal(section.items.length, 0); assert.match(section.error, /connection closed/);
+});
+test('KBJ rejects a repurposed domain redirect and does not invent a replacement', async () => {
+  const c = load('kbjfan-mini-library.js'); c.Widget.http.get = async () => ({ statusCode: 200, finalURL: 'https://other.test/', data: '<h1>Other site</h1>' });
+  await assert.rejects(c.getHome({}), /跳转到其他站点/);
+  c.Widget.http.get = async () => ({ statusCode: 403, data: '<html>Forbidden</html>' });
+  await assert.rejects(c.getHome({}), /HTTP 403/);
+});
+test('KBJ accepts request-only HTTP and nested response HTML while preserving old contexts', async () => {
+  const c = load('kbjfan-mini-library.js'); const calls = [];
+  c.Widget.http = { async request(options) { calls.push(options); return { statusCode: 200, body: { html: '<posts class="posts-item"><h2 class="item-heading"><a href="/film/">Film</a></h2><img data-src="/poster.jpg"></posts>' } }; } };
+  const home = await c.getHome(JSON.stringify({ params: JSON.stringify({ baseURL: 'https://kbj.test' }) }));
+  assert.equal(home.hero[0].id, 'https://kbj.test/film/'); assert.equal(calls[0].url, 'https://kbj.test/koreanbjdance/'); assert.equal(calls[0].browserFallback, false);
+});
+test('KBJ and Taolu bound a hung response body as well as their HTTP request', async () => {
+  for (const file of ['kbjfan-mini-library.js', 'taolusm-mini-library.js']) {
+    const c = load(file, { setTimeout: (fn, ms) => setTimeout(fn, Math.min(ms, 15)) });
+    c.Widget.http.get = async () => ({ statusCode: 200, text: () => new Promise(() => {}) });
+    await assert.rejects(c.fetchText({}, 'https://source.test/'), /超时/);
+  }
+});
+test('Madou first screen loads only recent media; category artwork remains lazy', async () => {
+  const c = load('madou8-mini-library 5.js'); const calls = [];
+  c.Widget.http.get = async url => { calls.push(url); return { statusCode: 200, body: { html: madouCard('first') } }; };
+  const home = await c.getHome(JSON.stringify({ params: JSON.stringify({ baseUrl: 'https://madou.test' }) }));
+  assert.deepEqual(calls, ['https://madou.test/asian/zh-CN/videos/recent']); assert.equal(home.hero[0].id, 'first');
+  assert.equal(home.sections[0].lazy, true); assert.equal(home.sections[1].items[0].rank, 1);
+});
+test('Madou page failures do not turn into successful empty home or fake qualities', async () => {
+  const c = load('madou8-mini-library 5.js'); c.Widget.http.get = async () => ({ statusCode: 403, data: '<h1>Forbidden</h1>' });
+  await assert.rejects(c.getHome({}), /HTTP 403/);
+  c.Widget.http.get = async () => ({ statusCode: 200, data: '<html>No cards</html>' });
+  await assert.rejects(c.getHome({}), /未收到影片列表/);
+  c.fetchStreamInfo = async () => ({ playlist: [{ url: 'https://invalid.test/stream.m3u8' }] }); c.fetchHlsText = async () => { throw new Error('HTTP 403'); };
+  await assert.rejects(c.buildPlaybackGroups({}, 'https://madou.test/detail', 'uid', 'Film'), /没有可验证/);
+});
+test('Madou one challenged page can return native browser HTML without media capture or retry stacks', async () => {
+  const c = load('madou8-mini-library 5.js'); let browsers = 0;
+  c.Widget.http.get = async () => ({ statusCode: 403, data: '<title>Just a moment</title>' });
+  c.Widget.browser = { async fetch(url, options) { browsers++; assert.equal(options.visible, false); assert.equal(options.waitForMediaSource, undefined); return { html: madouCard('verified') }; } };
+  const home = await c.getHome({}); assert.equal(home.hero[0].id, 'verified'); assert.equal(browsers, 1);
+  await assert.rejects(c.fetchHlsText({}, 'https://cdn.test/master.m3u8', 'https://madou.test/'), /HTTP 403/); assert.equal(browsers, 1);
+});
+test('Madou relative cards and signed HLS paths round-trip without URL global', () => {
+  const c = load('madou8-mini-library 5.js', { URL: undefined });
+  const items = c.parseCards(madouCard('film'), {});
+  assert.equal(items[0].action.detailUrl, 'https://madou8.pw/asian/zh-CN/video/cid/film');
+  assert.equal(c.resolveURL('../720/video.m3u8?sig=a/b#part', 'https://cdn.test/token/master.m3u8'), 'https://cdn.test/720/video.m3u8?sig=a/b#part');
+});
+test('Madou evaluates a working line beyond the old first-four limit and skips web-only schemes', async () => {
+  const c = load('madou8-mini-library 5.js'); const calls = [];
+  const playlist = Array.from({length: 5}, (_, i) => ({ url: `https://cdn.test/${i}/master.m3u8` }));
+  playlist.unshift({ url: 'https://enc.test/stream.m3u8', playMode: 'streampipe' }, { url: 'https://web.test/stream.m3u8', native: false });
+  c.fetchHlsText = async (ctx, url) => { calls.push(url); if (url.includes('/4/')) return url.endsWith('master.m3u8') ? master : media; throw new Error('HTTP 403'); };
+  const chosen = await c.chooseStream({}, playlist, 1080, 'https://madou.test/detail');
+  assert.equal(chosen.height, 1080); assert.match(chosen.url, /\/4\/1080.m3u8/); assert.ok(!calls.some(url => /enc.test|web.test/.test(url)));
+});
+test('Madou retains public player Accept-sign headers for master, variant and native playback', async () => {
+  const c = load('madou8-mini-library 5.js'); const calls = [];
+  c.Widget.http.get = async (url, options) => { calls.push({url, headers: options.headers}); return {statusCode:200,data:url.endsWith('master.m3u8') ? master : media}; };
+  const chosen = await c.chooseStream({}, [{url:'https://cdn.test/master.m3u8',urlSign:'opaque normal value'}], 720, 'https://madou.test/detail');
+  assert.equal(chosen.height, 720); assert.equal(chosen.headers.Accept, '*/*;sign=opaque%20normal%20value');
+  assert.ok(calls.every(x => x.headers.Accept === chosen.headers.Accept)); assert.equal(chosen.headers.Origin, undefined);
+  const q = await c.discoverVariants({}, [{url:'https://cdn.test/master.m3u8',urlSign:'private-now'}], 'https://madou.test/detail');
+  assert.ok(!JSON.stringify(q).includes('private-now'));
+});
+test('Madou original media playlists expose honest original quality and refresh before every play', async () => {
+  const c = load('madou8-mini-library 5.js'); let api = 0;
+  c.Widget.http.get = async url => ({statusCode:200,data:url.includes('/api/video/stream') ? JSON.stringify({playlist:[{url:`https://cdn.test/stream.m3u8?fresh=${++api}`,urlSign:`now-${api}`} ]}) : media});
+  const detail = 'https://madou8.pw/asian/zh-CN/video/cid/film';
+  const groups = await c.buildPlaybackGroups(c.madouContext({}), detail, 'uid', 'Film');
+  assert.equal(groups[0].versions[0].name, '原始画质'); assert.ok(!JSON.stringify(groups).includes('now-'));
+  const action = groups[0].versions[0].action;
+  for (const height of [0, 720, 0]) {
+    const result = await c.resolvePlayback(JSON.stringify({...action,qualityId:height,url:'https://expired.test/file.m3u8'}));
+    assert.match(result.url, new RegExp(`fresh=${api}$`)); assert.equal(result.headers.Accept, `*/*;sign=now-${api}`);
+  }
+  assert.equal(api, 4);
+});
+test('Madou media discovery caps concurrency and the overall deadline when native requests hang', async () => {
+  const c = load('madou8-mini-library 5.js', {setTimeout:(fn,ms)=>setTimeout(fn,Math.min(ms,20))}); let active=0,max=0;
+  c.Widget.http.get = async () => { active++; max=Math.max(max,active); return new Promise(()=>{}); };
+  const playlist=Array.from({length:9},(_,i)=>({url:`https://cdn.test/${i}/master.m3u8`}));
+  const start=Date.now(); await assert.rejects(c.chooseStream({__deadline:Date.now()+25},playlist,0,'https://madou.test/detail'), /stage=/);
+  assert.ok(Date.now()-start<150); assert.ok(max<=6); // timed-out native calls cannot be cancelled; logical workers remain three
+});
+test('Taolu detail and versions identify public previews, not download/login pages or recommendations', async () => {
+  const c=load('taolusm-mini-library.js'); const calls=[];
+  c.Widget.http.get=async url=>{calls.push(url);return {statusCode:200,data:taoluPage('121576','https://tl.test/preview_mp4/121576.mp4')};};
+  const detail=await c.getDetail({itemId:'121576'}); const version=detail.resourceGroups[0].versions[0];
+  assert.equal(version.name,'公开预览（非完整影片）'); assert.equal(version.url,undefined); assert.match(detail.overview,/完整影片需要/);
+  const result=await c.resolvePlayback(JSON.stringify(version.action)); assert.equal(result.url,'https://tl.test/preview_mp4/121576.mp4'); assert.equal(result.container,'mp4'); assert.equal(result.headers.Origin,undefined);
+  assert.ok(calls.every(url=>url.endsWith('/v/121576'))); assert.equal(c.parsePlaybackSource(taoluPage('other','https://tl.test/preview_mp4/other.mp4'),'121576').url,'');
+});
+test('Taolu old complete/download choices report access requirements instead of silently substituting previews', async () => {
+  const c=load('taolusm-mini-library.js');c.Widget.http.get=async()=>({statusCode:200,data:taoluPage('121576','https://tl.test/preview_mp4/121576.mp4')});
+  await assert.rejects(c.resolvePlayback({versionId:'download-121576'}),/旧下载线路需要/);
+  await assert.rejects(c.resolvePlayback({url:'https://taolusm.com/download/121576'}),/旧下载线路需要/);
+  assert.equal(c.itemIdFromContext({itemId:'https://taolusm.com/v/121576?year=2026'}),'121576');
+});
+test('Taolu missing source, HTTP errors and login redirects never become MP4 playback results', async () => {
+  const c=load('taolusm-mini-library.js');
+  for(const response of [{statusCode:200,data:'<video data-src="https://tl.test/snapshots/999.mp4"></video>'},{statusCode:403,data:'Forbidden'},{statusCode:200,finalURL:'https://taolusm.com/login',data:'Login'}]) {
+    c.Widget.http.get=async()=>response;
+    await assert.rejects(c.resolvePlayback({itemId:'121576'}),/未提供|HTTP 403|需要站点登录/);
+  }
+});
+
+test('Madou history refresh ignores an old media URL when only stable item/version is present', async () => {
+  const c=load('madou8-mini-library 5.js');const version=c.encodeVersionId({url:'https://madou8.pw/asian/zh-CN/video/cid/film',uid:'uid',height:720});
+  assert.equal(c.detailURL({itemId:'film',url:'https://expired.test/stream.m3u8'}),'https://madou8.pw/asian/zh-CN/video/cid/film');
+  assert.equal(c.detailURL({versionId:version,url:'https://expired.test/stream.m3u8'}),'https://madou8.pw/asian/zh-CN/video/cid/film');
+});
+test('Madou native response body timeouts and logical media concurrency remain bounded', async () => {
+  const c=load('madou8-mini-library 5.js',{setTimeout:(fn,ms)=>setTimeout(fn,Math.min(ms,15))});
+  c.Widget.http.get=async()=>({statusCode:200,text:()=>new Promise(()=>{})});
+  await assert.rejects(c.getHome({}),/stage=page-http/);
+  let active=0,max=0;
+  const results=await c.madouMap([1,2,3,4,5,6,7],3,async value=>{active++;max=Math.max(max,active);await new Promise(resolve=>setTimeout(resolve,3));active--;return value;});
+  assert.deepEqual(plain(results),[1,2,3,4,5,6,7]);assert.equal(max,3);
+});
+test('KBJ unrelated HTML cannot create fake playable lines or successful first categories', async () => {
+  const c=load('kbjfan-mini-library.js');c.Widget.http.get=async()=>({statusCode:200,data:'<title>Other site</title>'});
+  await assert.rejects(c.getCategory({pageId:'dance'}),/没有原站影片/);
+  const detail=await c.getDetail({itemId:'https://www.kbjfan.com/old-film/'});assert.equal(detail.resourceGroups.length,0);
+  await assert.rejects(c.getResourceVersions({itemId:'https://www.kbjfan.com/old-film/'}),/没有可播放媒体/);
+});
