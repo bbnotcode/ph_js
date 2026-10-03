@@ -123,12 +123,82 @@ test('MissAV does not invoke player/browser fallbacks after a complete master di
   const result = await c.resolvePlayback({ itemId: c.makeItemId('https://missav.ws/cn/a', 'A', '') });
   assert.equal(result.url, 'https://cdn.test/1080.m3u8'); assert.equal(linked, 0); assert.equal(browser, 0);
 });
-test('MissAV 1.5.10 accepts the original 1.0.7 detail payload and all legacy parameter names', () => {
+test('MissAV accepts the original 1.0.7 detail payload and all legacy parameter names', () => {
   const c = load('missav-mini-library-download-working 6.js');
   const old = 'missav://detail?url=https%3A%2F%2Fmissav.ws%2Fdm247%2Fcn%2Fsample&title=Old';
   assert.equal(c.detailUrlFromContext({ itemId: old }), 'https://missav.ws/dm247/cn/sample');
   const names = c.getManifest().parameters.map(p => p.name);
   for (const name of ['baseURL', 'entryPath', 'backupBaseURLs', 'enableBrowserFallback', 'browserVisible', 'requestTimeoutSeconds', 'cacheMinutes']) assert.ok(names.includes(name));
+});
+
+const missavFile = 'missav-mini-library-download-working 6.js';
+const missavPage = '<html><title>Sample - MissAV</title><body>' +
+  '<script>var source="https://cdn.test/playlist.m3u8";var source1920="https://cdn.test/1080p/video.m3u8";var source1280="https://cdn.test/720p/video.m3u8";</script>' +
+  '<script src="/cdn-cgi/challenge-platform/scripts/jsd/main.js"></script></body></html>';
+function missavInput(c) { return { itemId: c.makeItemId('https://missav.ws/cn/sample-001', 'Sample', '') }; }
+function acceleratedTimers() { return { setTimeout: (fn, ms) => setTimeout(fn, ms / 100) }; }
+
+test('MissAV HTTP 200 passive Cloudflare detection is not a blocking challenge', async () => {
+  const c = load(missavFile); const requests = []; let browser = 0;
+  c.Widget.http.get = async url => { requests.push(url); return { statusCode: 200, data: url.includes('.m3u8') ? master : missavPage }; };
+  c.Widget.browser = { async fetch() { browser++; throw new Error('browser must not be needed'); } };
+  const result = await c.resolvePlayback(missavInput(c));
+  assert.equal(result.url, 'https://cdn.test/1080.m3u8');
+  assert.equal(browser, 0);
+  assert.deepEqual(requests, ['https://missav.ws/cn/sample-001', 'https://cdn.test/playlist.m3u8']);
+  assert.equal(c.isCloudflare(missavPage, 200, { server: 'cloudflare' }), false);
+  for (const [html, status, headers] of [
+    ['<html><title>Just a moment...</title><body>Verify you are human</body></html>', 200, {}],
+    [missavPage, 200, { 'Cf-Mitigated': 'challenge' }], [missavPage, 403, {}]
+  ]) assert.equal(c.isUsableHTML(html, status, headers), false);
+});
+test('MissAV uses its one browser call for media capture after a real challenge', async () => {
+  const c = load(missavFile); const browserCalls = [], requests = [];
+  c.Widget.http.get = async url => { requests.push(url); return { statusCode: 200, data: url.includes('.m3u8') ? master : '<html><title>Just a moment...</title><body>Enable JavaScript and cookies to continue</body></html>' }; };
+  c.Widget.browser = { async fetch(url, options) { browserCalls.push({ url, options }); return { mediaSources: [{ url: 'https://cdn.test/playlist.m3u8' }] }; } };
+  assert.equal((await c.resolvePlayback(missavInput(c))).url, 'https://cdn.test/1080.m3u8');
+  assert.equal(browserCalls.length, 1); assert.equal(browserCalls[0].options.captureMedia, true);
+  assert.equal(browserCalls[0].options.visible, false); assert.equal(requests.length, 2);
+});
+test('MissAV a host that ignores HTTP timeout still reaches media capture before the total deadline', async () => {
+  const c = load(missavFile, acceleratedTimers()); let browser = 0, requests = 0;
+  c.Widget.http.get = async url => { requests++; return url.includes('.m3u8') ? { status: 200, data: master } : new Promise(() => {}); };
+  c.Widget.browser = { async fetch() { browser++; return { mediaSources: [{ url: 'https://cdn.test/playlist.m3u8' }] }; } };
+  assert.equal((await c.resolvePlayback(missavInput(c))).url, 'https://cdn.test/1080.m3u8');
+  assert.equal(browser, 1); assert.equal(requests, 2);
+});
+test('MissAV a hung browser reports the failing media stage without retrying mirrors', async () => {
+  const c = load(missavFile, acceleratedTimers()); let browser = 0, requests = 0;
+  c.Widget.http.get = async () => { requests++; throw new Error('offline'); };
+  c.Widget.browser = { async fetch() { browser++; return new Promise(() => {}); } };
+  await assert.rejects(c.resolvePlayback(missavInput(c)), error => /stage=browser-media/.test(error.message) && !/total-deadline/.test(error.message));
+  assert.equal(browser, 1); assert.equal(requests, 1);
+});
+test('MissAV a hung optional master probe hands off the highest HTML quality without another browser', async () => {
+  const c = load(missavFile, acceleratedTimers()); let browser = 0;
+  c.Widget.http.get = async url => url.includes('.m3u8') ? new Promise(() => {}) : { status: 200, data: missavPage };
+  c.Widget.browser = { async fetch() { browser++; return new Promise(() => {}); } };
+  assert.equal((await c.resolvePlayback(missavInput(c))).url, 'https://cdn.test/1080p/video.m3u8');
+  assert.equal(browser, 0);
+});
+test('MissAV playback refreshes detail HTML instead of using cached signed source URLs', async () => {
+  const c = load(missavFile); let refreshes = 0;
+  c.setCachedText({}, 'https://missav.ws/cn/sample-001', missavPage);
+  c.Widget.http.get = async url => { if (url.includes('.m3u8')) return { status: 200, data: media }; refreshes++; return { status: 200, data: missavPage.replaceAll('https://cdn.test/', 'https://fresh.test/' + refreshes + '/') }; };
+  assert.equal((await c.resolvePlayback(missavInput(c))).url, 'https://fresh.test/1/1080p/video.m3u8');
+  assert.equal((await c.resolvePlayback(missavInput(c))).url, 'https://fresh.test/2/1080p/video.m3u8');
+  assert.equal(refreshes, 2);
+});
+test('MissAV optional master discovery reserves time to hand off an already discovered stream', async () => {
+  let offset = 0, masterTimeout;
+  class PlaybackClock extends Date { static now() { return Date.now() + offset; } }
+  const c = load(missavFile, { ...acceleratedTimers(), Date: PlaybackClock });
+  c.Widget.http.get = async (url, options) => {
+    if (url.includes('.m3u8')) { masterTimeout = options.timeoutSeconds; return new Promise(() => {}); }
+    offset = 26500; return { status: 200, data: missavPage };
+  };
+  assert.equal((await c.resolvePlayback(missavInput(c))).url, 'https://cdn.test/1080p/video.m3u8');
+  assert.ok(masterTimeout > 0 && masterTimeout <= 1);
 });
 test('MissAV resource discovery failure does not become a fake playable webpage', async () => {
   const c = load('missav-mini-library-download-working 6.js');
