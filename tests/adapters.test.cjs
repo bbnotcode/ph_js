@@ -317,10 +317,10 @@ test('Taolu pre-task snapshot retains its download version and original playback
   assert.equal(playback.container, 'mp4');
 });
 
-function javggListHTML(slugs, next) {
+function javggListHTML(slugs, next, origin = 'https://javgg.net') {
   return '<html><body><div class="items">' + slugs.map(slug =>
     '<article class="item movies"><div class="poster"><img data-src="https://img.test/' + slug + '.jpg"></div>' +
-    '<div class="data"><h3><a href="https://javgg.net/jav/' + slug + '/">Video ' + slug + '</a></h3></div></article>'
+    '<div class="data"><h3><a href="' + origin + '/jav/' + slug + '/">Video ' + slug + '</a></h3></div></article>'
   ).join('') + '</div>' + (next ? '<a class="next" href="' + next + '">Next</a>' : '') + '</body></html>';
 }
 function javggDetail(lines = ['VH', 'playmate', 'luluvdoo', 'SW']) {
@@ -333,11 +333,12 @@ function packedJavgg(host = 'cdn', file = 'master', signature = 'fresh') {
 }
 
 for (const [id, sort] of [['popular-today','today'],['popular-weekly','weekly']]) {
-  test(`JAVGG ${sort} retries one timeout and returns ranked posters`, async () => {
+  test(`JAVGG ${sort} falls back from a timed-out mirror and returns original ranked posters`, async () => {
     const c=load('javgg-mini-library.js');let calls=0;
     c.Widget.http.get=async(url,options)=>{
-      assert.equal(url,`https://javgg.net/trending/?sort=${sort}`);
+      assert.equal(url,`https://javgg.${calls===0?'co':'net'}/trending/?sort=${sort}`);
       assert.equal(options.timeout,calls===0?18:8);assert.equal(options.timeoutSeconds,options.timeout);
+      assert.equal(options.headers.Referer,`https://javgg.${calls===0?'co':'net'}/`);
       assert.equal(options.browserFallback,false);
       if(++calls===1) throw Error('请求超时');
       return {status:200,body:Promise.resolve(javggListHTML([sort+'-a',sort+'-b']))};
@@ -345,9 +346,78 @@ for (const [id, sort] of [['popular-today','today'],['popular-weekly','weekly']]
     c.Widget.browser={async fetch(){assert.fail('ordinary ranking must not open a browser');}};
     const section=await c.getHomeSection(JSON.stringify({sectionId:id}));
     assert.equal(calls,2);assert.deepEqual(plain(section.items.map(x=>x.rank)),[1,2]);
+    assert.ok(!section.title.includes('JAVGG.CO'));
     assert.ok(section.items.every(x=>x.poster.includes(sort)&&x.imageHeaders.Referer&&x.action.itemId));
     const category=await c.getCategory({pageId:id});assert.equal(calls,2);
     assert.deepEqual(plain(category.items.map(x=>x.id)),plain(section.items.map(x=>x.id)));
+  });
+  test(`JAVGG ${sort} mirror returns labeled real rankings and preserves original detail/playback identities`, async () => {
+    const c=load('javgg-mini-library.js');const urls=[];
+    c.Widget.http.get=async(url,options)=>{
+      urls.push(url);assert.equal(url,`https://javgg.co/trending/?sort=${sort}`);
+      assert.equal(options.headers.Referer,'https://javgg.co/');
+      return {status:200,body:Promise.resolve(javggListHTML([sort+'-a',sort+'-b'],null,'https://javgg.co'))};
+    };
+    c.Widget.browser={async fetch(){assert.fail('public mirror lists must not open a browser');}};
+    const section=await c.getHomeSection({sectionId:id});
+    assert.equal(urls.length,1);assert.equal(section.title,`${id==='popular-today'?'今日热门':'本周热门'} · JAVGG.CO榜单`);
+    assert.deepEqual(plain(section.items.map(x=>x.rank)),[1,2]);
+    for(const item of section.items){
+      assert.ok(item.badges.includes('JAVGG.CO榜单'));assert.equal(item.type,'movie');
+      assert.match(item.imageHeaders.Referer,/^https:\/\/javgg\.co\/jav\//);
+      assert.match(c.decodePayload(item.id).detailUrl,/^https:\/\/javgg\.net\/jav\//);
+      assert.equal(item.id,item.action.itemId);assert.match(item.poster,/https:\/\/img\.test\//);
+    }
+    const category=await c.getCategory({pageId:id,title:section.moreAction.title});
+    assert.equal(urls.length,1);assert.equal(category.title,section.title);
+    assert.deepEqual(plain(category.items.map(x=>x.id)),plain(section.items.map(x=>x.id)));
+    c.Widget.http.get=async url=>{urls.push(url);return {data:javggDetail(['VH','SW'])};};
+    const detail=await c.getDetail({itemId:section.items[0].action.itemId});
+    assert.equal(urls[1],`https://javgg.net/jav/${sort}-a/`);
+    assert.deepEqual(plain(detail.resourceGroups.map(x=>x.title)),['VH 线路','SW 线路']);
+  });
+}
+
+for(const [name,response] of [['challenge',{status:403,data:'JAVGG | Checking Browser'}],['empty',{status:200,data:'<html>No movies</html>'}]]){
+  test(`JAVGG ${name} mirror response falls back once without caching invalid HTML`,async()=>{
+    const c=load('javgg-mini-library.js');const urls=[];
+    c.Widget.http.get=async url=>{urls.push(url);return urls.length===1?response:{status:200,data:javggListHTML(['original'])};};
+    const section=await c.getHomeSection({sectionId:'popular-today'});
+    assert.deepEqual(urls,['https://javgg.co/trending/?sort=today','https://javgg.net/trending/?sort=today']);
+    assert.equal(section.items[0].title,'Video original');assert.ok(!section.title.includes('JAVGG.CO'));
+    await c.getCategory({pageId:'popular-today'});assert.equal(urls.length,2);
+  });
+}
+
+test('JAVGG custom trending domain is not silently replaced by the default mirror',async()=>{
+  const c=load('javgg-mini-library.js');const urls=[];
+  c.Widget.http.get=async url=>{urls.push(url);if(urls.length===1)throw Error('请求超时');return {data:javggListHTML(['custom'],null,'https://custom.test')};};
+  const section=await c.getHomeSection({sectionId:'popular-today',params:{baseUrl:'https://custom.test/'}});
+  assert.deepEqual(urls,['https://custom.test/trending/?sort=today','https://custom.test/trending/?sort=today']);
+  assert.equal(c.decodePayload(section.items[0].id).detailUrl,'https://custom.test/jav/custom/');
+  assert.ok(!section.title.includes('JAVGG.CO'));
+});
+
+for(const mirror of [true,false]){
+  test(`JAVGG page two retains the ${mirror?'mirror':'original fallback'} ranking source`,async()=>{
+    const c=load('javgg-mini-library.js');const urls=[];let pageTwoCalls=0;
+    c.Widget.http.get=async url=>{
+      urls.push(url);
+      if(!mirror&&url.includes('javgg.co'))return {status:403,data:'Checking Browser'};
+      if(url.includes('/page/2/')&&++pageTwoCalls===1)throw Error('请求超时');
+      return {data:javggListHTML([url.includes('/page/2/')?'second':'first'],null,new URL(url).origin)};
+    };
+    const first=await c.getCategory({pageId:'popular-today'});
+    const second=await c.getCategory({pageId:'popular-today',page:2,title:first.title});
+    const origin=mirror?'https://javgg.co':'https://javgg.net';
+    assert.deepEqual(urls.slice(-2),[origin+'/trending/page/2/?sort=today',origin+'/trending/page/2/?sort=today']);
+    assert.equal(second.items[0].title,'Video second');assert.notEqual(first.items[0].id,second.items[0].id);
+    assert.equal(second.title,first.title);assert.equal(second.title.includes('JAVGG.CO'),mirror);
+    assert.equal(c.decodePayload(second.items[0].id).detailUrl,'https://javgg.net/jav/second/');
+    assert.equal(c.trendingTitle('今日热门 · JAVGG.CO榜单','<html></html>'),'今日热门');
+    // Evict the first HTML page without losing the selected site's ranking.
+    for(let page=3;page<=11;page++)await c.getCategory({pageId:'popular-today',page});
+    assert.equal(urls.at(-1),origin+'/trending/page/11/?sort=today');
   });
 }
 
@@ -355,7 +425,7 @@ test('JAVGG trending keeps daily, weekly, domain and page-two caches distinct an
   const c=load('javgg-mini-library.js');const urls=[];
   c.Widget.http.get=async url=>{
     urls.push(url);await new Promise(resolve=>setTimeout(resolve,5));
-    return {status:200,data:javggListHTML([url.includes('/page/2/')?'p2':url.includes('weekly')?'week':'day'],'https://javgg.net/trending/page/2/?sort=today')};
+    return {status:200,data:javggListHTML([url.includes('/page/2/')?'p2':url.includes('weekly')?'week':'day'],url.includes('/page/2/')?'https://javgg.co/trending/page/3/?sort=today':'https://javgg.co/trending/page/2/?sort=today',new URL(url).origin)};
   };
   const sections=await Promise.all([c.getHomeSection({sectionId:'popular-today'}),c.getHomeSection({sectionId:'popular-today'})]);
   assert.equal(urls.length,1);assert.deepEqual(plain(sections[0]),plain(sections[1]));
@@ -363,7 +433,9 @@ test('JAVGG trending keeps daily, weekly, domain and page-two caches distinct an
   const second=await c.getCategory({pageId:'popular-today',page:2});
   const weekly=await c.getHomeSection({sectionId:'popular-weekly'});
   await c.getHomeSection({sectionId:'popular-today',params:{baseUrl:'https://custom.test'}});
-  assert.deepEqual(urls,['https://javgg.net/trending/?sort=today','https://javgg.net/trending/page/2/?sort=today','https://javgg.net/trending/?sort=weekly','https://custom.test/trending/?sort=today']);
+  assert.deepEqual(urls,['https://javgg.co/trending/?sort=today','https://javgg.co/trending/page/2/?sort=today','https://javgg.co/trending/?sort=weekly','https://custom.test/trending/?sort=today']);
+  assert.equal(second.hasMore,true);assert.match(second.title,/JAVGG.CO榜单/);
+  assert.equal(c.decodePayload(second.items[0].id).detailUrl,'https://javgg.net/jav/p2/');
   assert.notEqual(second.items[0].id,sections[0].items[0].id);assert.notEqual(weekly.items[0].id,sections[0].items[0].id);
 });
 
@@ -375,7 +447,9 @@ test('JAVGG trending never caches failed or challenged lists and retrying can re
   available=true;assert.equal((await c.getHomeSection({sectionId:'popular-today'})).items[0].title,'Video recovered');assert.equal(calls,3);
   c.Widget.http.get=async()=>{calls++;return {status:403,data:'Just a moment'};};
   const challenge=await c.getHomeSection({sectionId:'popular-weekly'});
-  assert.match(challenge.items[0].subtitle,/403/);assert.equal(calls,4);
+  assert.match(challenge.items[0].subtitle,/403/);assert.equal(calls,5);
+  c.Widget.http.get=async()=>{calls++;return {data:javggListHTML(['week-recovered'],null,'https://javgg.co')};};
+  assert.equal((await c.getHomeSection({sectionId:'popular-weekly'})).items[0].title,'Video week-recovered');assert.equal(calls,6);
 });
 
 test('JAVGG trending permanently hung requests stop after two bounded attempts', async () => {
@@ -588,7 +662,7 @@ test('JAVGG uses observed luluvdoo headers and does not invent headers for other
 test('JAVGG current release keeps imported identity, parameters and the historical restoration record', () => {
   const c = load('javgg-mini-library.js');
   assert.equal(c.getManifest().id, 'javgg-mini-library');
-  assert.equal(c.getManifest().version, '1.0.9');
+  assert.equal(c.getManifest().version, '1.0.10');
   assert.deepEqual(plain(c.getManifest().parameters.map(x => x.name)), ['baseUrl','manualQuality']);
   assert.equal(c.getManifest().parameters.find(x => x.name === 'manualQuality').defaultValue, false);
   assert.equal(restoration.supersededFiles['javgg-mini-library.js'].replacementVersion, '1.0.4');
@@ -608,7 +682,7 @@ test('JAVGG working home keeps its original HTTP options, real cards and lazy se
   assert.equal(c.detailURLFromId(home.hero[0].action.itemId),'https://javgg.net/jav/a/');
   assert.equal(home.sections.filter(s=>s.lazy).length,9);
 });
-test('JAVGG working category and search keep page two URLs and distinct detail IDs', async () => {
+test('JAVGG trending mirror pagination keeps distinct detail IDs while search stays on the original site', async () => {
   const c=load('javgg-mini-library.js');const urls=[];
   c.Widget.http.get=async url=>{
     urls.push(url);return {data:javggListHTML([url.includes('/page/2/')?'two':'one'],url.includes('/page/2/')?'':'/page/2/')};
@@ -618,7 +692,7 @@ test('JAVGG working category and search keep page two URLs and distinct detail I
   assert.notEqual(first.items[0].id,second.items[0].id);
   assert.equal(first.hasMore,true);assert.equal(second.hasMore,false);
   await c.search({query:'A&B #tag',page:2});
-  assert.deepEqual(urls,['https://javgg.net/trending/?sort=weekly','https://javgg.net/trending/page/2/?sort=weekly','https://javgg.net/page/2/?s=A%26B%20%23tag']);
+  assert.deepEqual(urls,['https://javgg.co/trending/?sort=weekly','https://javgg.co/trending/page/2/?sort=weekly','https://javgg.net/page/2/?s=A%26B%20%23tag']);
 });
 test('JAVGG five current server labels stay associated when a container has no iframe', () => {
   const c=load('javgg-mini-library.js');

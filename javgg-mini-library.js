@@ -1,6 +1,8 @@
 // @name JAVGG Mini Library
 
 const JAVGG_DEFAULT_BASE = 'https://javgg.net';
+// Published in the source site's navigation; used only for trending lists.
+const JAVGG_TRENDING_MIRROR = 'https://javgg.co';
 const JAVGG_LOGO = 'https://javgg.net/javgg.png';
 const JAVGG_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1';
 const JAVGG_PAYLOAD_PREFIX = 'javgg://';
@@ -9,7 +11,7 @@ const WidgetMetadata = {
   id: 'javgg-mini-library',
   name: 'JAVGG',
   title: 'JAVGG',
-  version: '1.0.9',
+  version: '1.0.10',
   requiredVersion: '0.0.1',
   author: 'Alan huang',
   site: JAVGG_DEFAULT_BASE,
@@ -95,8 +97,10 @@ async function getHomeSection(rawCtx) {
   const ctx = normalizeContext(rawCtx);
   const section = findSection(firstNonEmpty(ctx.sectionId, ctx.id, ctx.pageId)) || JAVGG_SECTIONS[0];
   try {
-    const items = parseCards(ctx, await fetchSectionText(ctx, section, 1)).slice(0, 18);
-    return sectionResult(section, items.length ? items : [diagnosticItem(section.title + '暂无内容')]);
+    const html = await fetchSectionText(ctx, section, 1);
+    const items = parseSectionCards(ctx, html).slice(0, 18);
+    const loadedSection = Object.assign({}, section, { title: trendingTitle(section.title, html) });
+    return sectionResult(loadedSection, items.length ? items : [diagnosticItem(section.title + '暂无内容')]);
   } catch (error) {
     return sectionResult(section, [diagnosticItem(section.title + '加载失败', error)]);
   }
@@ -112,11 +116,11 @@ async function getCategory(rawCtx) {
   const url = section ? sectionURL(ctx, section, page) : pagedURL(baseURL(ctx) + (dynamicPath ? dynamicPath.path : '/new-post/'), page);
   try {
     const html = section ? await fetchSectionText(ctx, section, page) : await fetchText(ctx, url);
-    const items = parseCards(ctx, html);
+    const items = parseSectionCards(ctx, html);
     return {
       pageType: 'category',
       id: pageId,
-      title: title,
+      title: trendingTitle(title, html),
       style: 'media.posterGrid',
       itemAspectRatio: '2:3',
       page: page,
@@ -473,35 +477,73 @@ async function fetchText(ctx, url, referer) {
   return text;
 }
 
-// Only the two slow trending lists use bounded retry/cache. Never cache errors
-// or replace a daily/weekly ranking with another category's items.
+// Only the two trending lists use the published mirror and bounded fallback.
+// Mirror rankings have their own order and are explicitly labeled, not passed
+// off as .net rankings. Never cache errors or substitute a different category.
 const JAVGG_TRENDING_CACHE = Object.create(null);
 const JAVGG_TRENDING_PENDING = Object.create(null);
+// At most two source choices (daily/weekly), separate from cached HTML pages.
+const JAVGG_TRENDING_SOURCES = Object.create(null);
 
 async function fetchSectionText(ctx, section, page) {
   const url = sectionURL(ctx, section, page);
   if (section.id !== 'popular-today' && section.id !== 'popular-weekly') return fetchText(ctx, url);
-  const cached = JAVGG_TRENDING_CACHE[url];
+  const useMirror = baseURL(ctx) === JAVGG_DEFAULT_BASE;
+  // Within this runtime, continue the same site's ranking on subsequent pages.
+  // Do not combine .co page one with an unrelated .net page two ordering.
+  const preferMirror = useMirror && !(page > 1 && JAVGG_TRENDING_SOURCES[section.id] === 'original');
+  const cacheKey = url + '|' + (preferMirror ? 'mirror' : 'original');
+  const cached = JAVGG_TRENDING_CACHE[cacheKey];
   if (cached && Date.now() - cached.at < 60000) return cached.html;
-  if (JAVGG_TRENDING_PENDING[url]) return JAVGG_TRENDING_PENDING[url];
+  if (JAVGG_TRENDING_PENDING[cacheKey]) return JAVGG_TRENDING_PENDING[cacheKey];
+  const firstURL = preferMirror ? pagedURL(JAVGG_TRENDING_MIRROR + section.path, page) : url;
+  const canSwitch = useMirror && page <= 1;
+  const urls = [firstURL, canSwitch ? url : firstURL];
   const pending = withPlaybackBudget(ctx, async function (requestCtx) {
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        const html = await fetchPlaybackText(requestCtx, url, baseURL(ctx) + '/', null, attempt ? 8 : 18, 'trending-http');
+        const mirrorRequest = preferMirror && (!canSwitch || !attempt);
+        let html = await fetchPlaybackText(requestCtx, urls[attempt], mirrorRequest ? JAVGG_TRENDING_MIRROR + '/' : baseURL(ctx) + '/', null, attempt ? 8 : 18, 'trending-http');
         if (!parseCards(ctx, html).length) throw stageError('trending-empty', '热门榜单没有返回影片条目');
-        JAVGG_TRENDING_CACHE[url] = { at: Date.now(), html: html };
+        if (mirrorRequest) html = '<meta name="javgg-list-source" content="' + JAVGG_TRENDING_MIRROR + '">' + html;
+        if (useMirror && page <= 1) JAVGG_TRENDING_SOURCES[section.id] = mirrorRequest ? 'mirror' : 'original';
+        JAVGG_TRENDING_CACHE[cacheKey] = { at: Date.now(), html: html };
         const keys = Object.keys(JAVGG_TRENDING_CACHE);
         if (keys.length > 8) delete JAVGG_TRENDING_CACHE[keys[0]];
         return html;
       } catch (error) {
         const transient = /timeout|timed out|超时|network|网络|ECONN|fetch failed|trending-http-50[234]/i.test(String(error.message || error));
-        if (attempt || !transient) throw error;
+        // A different published site may work even after a challenge/empty page.
+        // Custom domains retain the previous one-transient-retry behavior.
+        if (attempt || (!canSwitch && !transient)) throw error;
       }
     }
   }, '热门榜单加载');
-  JAVGG_TRENDING_PENDING[url] = pending;
+  JAVGG_TRENDING_PENDING[cacheKey] = pending;
   try { return await pending; }
-  finally { delete JAVGG_TRENDING_PENDING[url]; }
+  finally { delete JAVGG_TRENDING_PENDING[cacheKey]; }
+}
+
+function trendingTitle(title, html) {
+  const mirror = metaContent(html, 'name', 'javgg-list-source') === JAVGG_TRENDING_MIRROR;
+  const original = String(title).replace(/ · JAVGG\.CO榜单$/i, '');
+  return mirror ? original + ' · JAVGG.CO榜单' : original;
+}
+
+function parseSectionCards(ctx, html) {
+  const items = parseCards(ctx, html);
+  if (metaContent(html, 'name', 'javgg-list-source') !== JAVGG_TRENDING_MIRROR) return items;
+  return items.map(function (item) {
+    const payload = decodePayload(item.id);
+    if (baseURL(ctx) === JAVGG_DEFAULT_BASE && payload.detailUrl.indexOf(JAVGG_TRENDING_MIRROR + '/jav/') === 0) {
+      payload.detailUrl = JAVGG_DEFAULT_BASE + payload.detailUrl.slice(JAVGG_TRENDING_MIRROR.length);
+      item.id = encodePayload(payload);
+      item.action = { type: 'detail', itemId: item.id };
+    }
+    // Keep the mirror image's original URL and Referer, not the playback site.
+    item.badges = (item.badges || []).concat(['JAVGG.CO榜单']);
+    return item;
+  });
 }
 
 async function httpGet(url, options) {
@@ -520,8 +562,8 @@ async function httpGet(url, options) {
   throw new Error('当前环境没有可用的 HTTP 客户端');
 }
 
-// The user's working list/detail HTTP path above stays unchanged.
-// Only resource discovery and playback use these bounded requests.
+// Ordinary list/detail HTTP stays unchanged. Playback and the two trending
+// lists use these bounded requests; their caller controls the stage budget.
 async function fetchPlaybackText(ctx, url, referer, headers, limit, stage) {
   const seconds = remainingPlaybackSeconds(ctx, limit || 4);
   stage = stage || 'playback-http';
