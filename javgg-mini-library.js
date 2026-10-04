@@ -9,7 +9,7 @@ const WidgetMetadata = {
   id: 'javgg-mini-library',
   name: 'JAVGG',
   title: 'JAVGG',
-  version: '1.0.4',
+  version: '1.0.5',
   requiredVersion: '0.0.1',
   author: 'Alan huang',
   site: JAVGG_DEFAULT_BASE,
@@ -383,7 +383,7 @@ async function discoverQualities(ctx, detailUrl, player, allowBrowser, captured)
 async function resolvePlayerMedia(ctx, playerUrl, detailUrl, allowBrowser) {
   let stage = 'player-media';
   try {
-    const playable = extractPlayableURL(await fetchPlaybackText(ctx, playerUrl, detailUrl || playerUrl, null, 4, 'player-http'));
+    const playable = extractPlayableURL(await fetchPlaybackText(ctx, playerUrl, detailUrl || playerUrl, null, 4, 'player-http'), playerUrl);
     if (playable) return { url: playable, headers: playbackHeaders(playerUrl) };
   } catch (error) { stage = error.stage || 'player-http'; }
   if (allowBrowser) {
@@ -507,7 +507,7 @@ async function extractFromBrowser(url, referer, ctx, limit) {
       });
       const captured = firstPlayableInBrowserResult(result);
       if (captured) return captured;
-      const link = extractPlayableURL(await playbackResponseText(result, 0));
+      const link = extractPlayableURL(await playbackResponseText(result, 0), url);
       if (link) return { url: link, headers: playbackHeaders(url) };
       const keys = Object.keys(result || {}).slice(0, 12).join(',');
       const blobOnly = /blob:https?:/.test(JSON.stringify((result && (result.mediaSources || result.capturedRequests || result.mediaRequests)) || []));
@@ -532,8 +532,12 @@ function firstPlayableInBrowserResult(result) {
   return null;
 }
 
-function extractPlayableURL(value) {
+function extractPlayableURL(value, playerUrl) {
   const text = htmlDecode(responseText(value) + '\n' + unpackPlayerScripts(responseText(value)).join('\n')).replace(/\\\//g, '/');
+  // Current Vidhide/Streamwish players select hls4 first. Generic URL matching
+  // otherwise selects the signed hls2 CDN (including its creator's ASN).
+  const gateway = text.match(/["']hls4["']\s*:\s*["']([^"']+)["']/i);
+  if (gateway && playerUrl) return resolveRelativeURL(playerUrl, gateway[1]);
   const patterns = [
     /(?:urlPlay|file|src)\s*[:=]\s*["'](https?:\/\/[^"']+\.(?:m3u8|mp4)(?:\?[^"']*)?)/i,
     /(https?:\/\/[^\s"'<>\\]+\.(?:m3u8|mp4)(?:\?[^\s"'<>\\]*)?)/i
@@ -826,10 +830,23 @@ async function resolvePlaybackWithinBudget(rawCtx) {
   let line = firstNonEmpty(payload.line, ctx.line);
   const requestedHeight = positiveInt(firstNonEmpty(payload.height, ctx.height), 0);
   let media;
-  if (!playerUrl && detailUrl) {
+  if (detailUrl) {
     const players = parsePlayers(await fetchPlaybackText(ctx, detailUrl, detailUrl, null, 4, 'detail-http'));
-    const selected = players.filter(function (item) { return payload.lineId ? item.lineId === payload.lineId : (line && item.line === line); });
-    const attempts = await inspectPlayerQualities(ctx, detailUrl, selected.length ? selected : players);
+    // Refresh saved iframe hosts; line numbers can change when a server retires.
+    const byName = players.filter(function (item) {
+      return line && normalizePlayerLine(item.line) === normalizePlayerLine(line);
+    });
+    const selected = byName.length ? byName : players.filter(function (item) {
+      return !line && payload.lineId && item.lineId === payload.lineId;
+    });
+    playerUrl = '';
+    // A selected version already specifies its line/quality. Refresh only its
+    // player; probing every line and every master again delays native startup.
+    if (selected.length) {
+      playerUrl = selected[0].url;
+      line = selected[0].line;
+    }
+    const attempts = playerUrl ? [] : await inspectPlayerQualities(ctx, detailUrl, players);
     const usable = attempts.filter(function (attempt) { return attempt.qualities.length; });
     usable.sort(function (a, b) {
       const aExact = a.qualities.some(function (q) { return q.height === requestedHeight && requestedHeight > 0; });
@@ -870,6 +887,11 @@ async function resolvePlaybackWithinBudget(rawCtx) {
 
 function attributeValue(tag, name) {
   return htmlDecode(firstMatch(tag, new RegExp('\\b' + escapeRegExp(name) + '\\s*=\\s*["\']([^"\']*)', 'i')));
+}
+
+function normalizePlayerLine(line) {
+  const value = String(line || '').toLowerCase();
+  return value === 'vh' ? 'vidhide' : value === 'sw' ? 'streamwish' : value;
 }
 
 function iframeURL(tag) {
