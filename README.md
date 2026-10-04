@@ -4,23 +4,25 @@
 
 已经导入 DreamBy 的入口继续使用原来的下载地址和媒体库 ID。每个下载入口都包含完整 JavaScript，不需要远程加载器。
 
-## 2026-10-04：七个媒体库恢复最早上传版
+## 2026-10-04：更正恢复到任务开始前的版本
 
-按用户确认，以下七个媒体库恢复到 GitHub 历史中最早上传的原始内容，包含原版版本号、参数和解析行为。此次恢复并非仅退回 2026-10-03 播放修复之前。
+用户更正恢复时间为昨天（2026-10-03）开始本轮任务之前。按上海时间 `2026-10-03 00:00:00 +08:00` 之前主分支最后的快照 `2fd0121bfbf0cc812d1e9e39501384710e684ade` 恢复。这十个目标路径与原审查基线 `8e43017532ec81e3338046ba6e32dff7655bd3dd` 完全同字节；两提交之间仅新增另一个库 `hsex-mini-library.js`。
 
-| 媒体库 / 当前下载文件 | 恢复版本 | 原始提交 |
-| --- | --- | --- |
-| [MissAV](missav-mini-library.js) | 1.0.0 | [a44d256](https://github.com/bbnotcode/ph_js/commit/a44d25631a06c29b4491610c96c965bb03c9711d) |
-| [SexBJCam](sexbjcam-mini-library.js) | 1.1.3 | [420f4fa](https://github.com/bbnotcode/ph_js/commit/420f4fa2a5812cb647249a184f59696cbbdb02fb) |
-| [ASMRLIB](asmrlib-mini-library.js) | 1.2.0 | [4a2ece9](https://github.com/bbnotcode/ph_js/commit/4a2ece99e4af217c1509c522c0d84d276b068b08) |
-| [JAVGG](javgg-mini-library.js) | 1.0.0 | [b17286b](https://github.com/bbnotcode/ph_js/commit/b17286ba023d392cf9a6e3935590e2bc5c528b06) |
-| [麻豆亚洲版](madou8-mini-library%205.js) | 1.0.1 | [2a16937](https://github.com/bbnotcode/ph_js/commit/2a16937466dfbb908ae1bab6a1347569299df1df) |
-| [套路 SM](taolusm-mini-library.js) | 1.0.0 | [fbb65e1](https://github.com/bbnotcode/ph_js/commit/fbb65e110e60561c4a557adb42c80dc2e173505f) |
-| [KBJ fan](kbjfan-mini-library.js) | 1.0.0 | [e943d61](https://github.com/bbnotcode/ph_js/commit/e943d616e2df05c3abf6fdf2a716780c9d6a0aff) |
+| 媒体库 / 当前下载文件 | 恢复版本 |
+| --- | --- |
+| [MissAV 普通版](missav-mini-library.js) | 1.0.7 |
+| [MissAV CloudFlare 版](missav-mini-library-CloudFlare.js) | 1.0.7 |
+| [MissAV download-working](missav-mini-library-download-working.js) / [working 6](missav-mini-library-download-working%206.js) | 1.5.9 |
+| [SexBJCam](sexbjcam-mini-library.js) | 1.1.7 |
+| [ASMRLIB](asmrlib-mini-library.js) | 1.2.0 |
+| [JAVGG](javgg-mini-library.js) | 1.0.0 |
+| [麻豆亚洲版](madou8-mini-library%205.js) | 1.1.0 |
+| [套路 SM](taolusm-mini-library.js) | 1.0.0 |
+| [KBJ fan](kbjfan-mini-library.js) | 1.0.0 |
 
-麻豆最早以 `madou8-mini-library.js` 上传，后来同一内容迭代为 `madou8-mini-library 5.js`；现将最早的 1.0.1 内容放回当前下载路径。MissAV 四个既有入口同步为同一份原始 1.0.0，避免兼容同步任务再次覆盖恢复结果。全部原 raw 下载地址保留。
+每个文件均恢复该时间点的原始内容、版本号和参数，原 raw 地址与库 ID 保留。MissAV 普通版和 CloudFlare 版虽然版本号相同，内容和参数不同，分别保留；只有内容相同的两个 download-working 文件继续同步。
 
-原始提交、原文件名及 SHA-256 记录在 [tools/library-first-versions.json](tools/library-first-versions.json)。恢复检查逐字节校验原版内容，语法、媒体库 ID 和原版公共入口继续验证。2026-10-03 的七库修复记录保留在下文作为历史记录。
+时间截止点、基线提交及十份文件 SHA-256 记录在 [tools/library-restoration.json](tools/library-restoration.json)。恢复检查校验每个路径的历史内容、真实 manifest、原版公共入口和对应版本行为。此前恢复最早上传版的操作已更正，下文播放修复为撤回的历史记录。
 
 ## 主维护文件与兼容入口
 
@@ -28,9 +30,9 @@
 | --- | --- | --- |
 | [eporner-mini-library 2.js](eporner-mini-library%202.js) | 1.0.9 | `eporner-mini-library.js` |
 | [xxxfollow-mini-library 5.js](xxxfollow-mini-library%205.js) | 1.0.1 | `xxxfollow-mini-library.js` |
-| [missav-mini-library-download-working 6.js](missav-mini-library-download-working%206.js) | 1.0.0 | `missav-mini-library-download-working.js`、`missav-mini-library.js`、`missav-mini-library-CloudFlare.js` |
+| [missav-mini-library-download-working 6.js](missav-mini-library-download-working%206.js) | 1.5.9 | `missav-mini-library-download-working.js` |
 
-Eporner、XXXFollow 的两份文件原本内容相同。MissAV 的四个入口现均为原始 1.0.0 的完整兼容副本，保留 `missav-mini-library` ID 和原版 `baseURL`、`entryPath` 参数。
+Eporner、XXXFollow 的两份文件原本内容相同。MissAV 两个 download-working 入口继续保持相同内容；普通版和 CloudFlare 版独立保留。
 
 日常只修改左侧主维护文件，再运行：
 
@@ -38,10 +40,11 @@ Eporner、XXXFollow 的两份文件原本内容相同。MissAV 的四个入口�
 node tools/sync-library-aliases.cjs
 ```
 
-GitHub Actions 会先生成兼容副本并验证；`main` 的检查通过后，如果副本有变化，机器人只提交这 5 个兼容文件。PR 要提交同步后的副本，检查会拒绝遗漏更新。主维护文件的新实现因此能继续通过所有旧下载路径获得。
+GitHub Actions 会先生成兼容副本并验证；`main` 的检查通过后，如果副本有变化，机器人只提交这 3 个兼容文件。PR 要提交同步后的副本，检查会拒绝遗漏更新。主维护文件的新实现因此能继续通过所有旧下载路径获得。
 
 ## 独立保留的入口
 
+- MissAV 普通版 `missav-mini-library.js`、CloudFlare 版 `missav-mini-library-CloudFlare.js` 各自保留任务之前的实现。
 - 麻豆亚洲版 `madou8-mini-library 5.js` 与国产版 `madou8-domestic-mini-library.js` 内容范围和 ID 不同，分别保留。
 - Jable、Pornhub、Hanime1、MissAV 的 Forward 与 DreamBy 入口分别保留。
 - Hanime1 的 `.fwd` 包和加密的 `twitter视频.js` 保持原格式；Stripchat ZIP、两个订阅索引和插件主程序保持一致。

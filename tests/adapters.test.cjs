@@ -228,9 +228,11 @@ test('XVideos attaches the configured session token without printing it', async 
   assert.equal(options.headers.Cookie,'session_token='+token); assert.ok(logs.every(line=>!line.includes(token)));
 });
 
-// These entrypoints intentionally restore their original uploaded bytes and contracts.
-// Recovery behavior added after those uploads is no longer part of this release.
-const firstVersions = JSON.parse(fs.readFileSync(path.join(root, 'tools/library-first-versions.json'), 'utf8'));
+// These entrypoints restore the online snapshot before the 2026-10-03 task.
+// Later recovery behavior is intentionally absent from the restored scripts.
+const restoration = JSON.parse(fs.readFileSync(path.join(root, 'tools/library-restoration.json'), 'utf8'));
+assert.equal(restoration.cutoff, '2026-10-03T00:00:00+08:00');
+assert.match(restoration.baselineCommit, /^[0-9a-f]{40}$/);
 const restoredIds = {
   'missav-mini-library.js': 'missav-mini-library',
   'sexbjcam-mini-library.js': 'sexbjcam-mini-library',
@@ -238,17 +240,18 @@ const restoredIds = {
   'javgg-mini-library.js': 'javgg-mini-library',
   'madou8-mini-library 5.js': 'madou8-mini-library',
   'taolusm-mini-library.js': 'taolusm-mini-library',
-  'kbjfan-mini-library.js': 'kbjfan-mini-library'
+  'kbjfan-mini-library.js': 'kbjfan-mini-library',
+  'missav-mini-library-CloudFlare.js': 'missav-mini-library',
+  'missav-mini-library-download-working.js': 'missav-mini-library',
+  'missav-mini-library-download-working 6.js': 'missav-mini-library'
 };
-assert.deepEqual(Object.keys(firstVersions).sort(), Object.keys(restoredIds).sort());
-for (const [file, original] of Object.entries(firstVersions)) {
-  test(`${file}: bytes match the recorded first upload`, () => {
-    assert.match(original.commit, /^[0-9a-f]{40}$/);
-    assert.ok(original.sourcePath.endsWith('.js'));
+assert.deepEqual(Object.keys(restoration.files).sort(), Object.keys(restoredIds).sort());
+for (const [file, original] of Object.entries(restoration.files)) {
+  test(`${file}: bytes match the pre-task online snapshot`, () => {
     const bytes = fs.readFileSync(path.join(root, file));
     assert.equal(crypto.createHash('sha256').update(bytes).digest('hex'), original.sha256);
   });
-  test(`${file}: restored manifest and public entrypoints retain the first-upload contract`, () => {
+  test(`${file}: restored manifest and public entrypoints retain the pre-task snapshot contract`, () => {
     const c = load(file);
     const manifest = c.getManifest();
     assert.equal(manifest.id, restoredIds[file]);
@@ -260,13 +263,15 @@ for (const [file, original] of Object.entries(firstVersions)) {
     }
   });
 }
-test('MissAV legacy download paths contain the same first-upload implementation', () => {
-  const bytes = fs.readFileSync(path.join(root, 'missav-mini-library.js'));
-  for (const file of ['missav-mini-library-CloudFlare.js', 'missav-mini-library-download-working.js', 'missav-mini-library-download-working 6.js']) {
-    assert.deepEqual(fs.readFileSync(path.join(root, file)), bytes, file);
-  }
+test('MissAV pre-task entrypoints preserve their distinct implementations and working alias', () => {
+  const canonical = fs.readFileSync(path.join(root, 'missav-mini-library.js'));
+  const cloudflare = fs.readFileSync(path.join(root, 'missav-mini-library-CloudFlare.js'));
+  const working = fs.readFileSync(path.join(root, 'missav-mini-library-download-working.js'));
+  assert.notDeepEqual(canonical, cloudflare);
+  assert.notDeepEqual(canonical, working);
+  assert.deepEqual(fs.readFileSync(path.join(root, 'missav-mini-library-download-working 6.js')), working);
 });
-test('MissAV first upload retains direct HLS playback and its detail identifier', async () => {
+test('MissAV pre-task snapshot retains direct HLS playback and its detail identifier', async () => {
   const c = load('missav-mini-library.js'); let requests = 0;
   c.Widget.http.get = async () => { requests++; throw new Error('direct playback should not fetch detail'); };
   const itemId = c.makeItemId('https://missav.ws/cn/sample', 'Sample', '');
@@ -275,7 +280,7 @@ test('MissAV first upload retains direct HLS playback and its detail identifier'
   assert.equal(playback.url, 'https://cdn.test/original.m3u8');
   assert.equal(playback.container, 'm3u8'); assert.equal(requests, 0);
 });
-test('ASMRLIB first upload retains separate embedded player lines and their version identifiers', async () => {
+test('ASMRLIB pre-task snapshot retains separate embedded player lines and their version identifiers', async () => {
   const c = load('asmrlib-mini-library.js');
   const post = 'becd2651e7d56ca656d27766d036dcee';
   c.Widget.http.get = async () => ({ data: '<h1>Sample</h1><div id="players"><button data-url="https://bysetayico.com/e/sample">BI</button><button data-url="https://abyssplayer.com/sample">AB</button></div><div id="downloads"></div>' });
@@ -287,14 +292,14 @@ test('ASMRLIB first upload retains separate embedded player lines and their vers
   assert.deepEqual(plain(versions.map(x => c.asmrVersionPlayerURL(x.action))), ['https://bysetayico.com/e/sample', 'https://abyssplayer.com/sample']);
   assert.equal(versions[0].default, true); assert.equal(versions[1].default, false);
 });
-test('KBJ first upload object search retains the configured domain and page', async () => {
+test('KBJ pre-task snapshot object search retains the configured domain and page', async () => {
   const c = load('kbjfan-mini-library.js'); const requests = [];
   c.Widget.http.get = async url => { requests.push(url); return { data: '<html></html>' }; };
   const result = await c.search({ query: 'A&B #tag', page: 2, params: { baseURL: 'https://kbj.test' } });
   assert.deepEqual(requests, ['https://kbj.test/?s=A%26B%20%23tag&paged=2']);
   assert.equal(result.pageType, 'search'); assert.equal(result.page, 2);
 });
-test('Taolu first upload retains its download version and original playback gateway', () => {
+test('Taolu pre-task snapshot retains its download version and original playback gateway', () => {
   const c = load('taolusm-mini-library.js');
   const groups = c.getResourceVersions({ itemId: '121576' });
   assert.equal(groups[0].versions[0].id, 'download-121576');
