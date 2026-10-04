@@ -9,7 +9,7 @@ const WidgetMetadata = {
   id: 'javgg-mini-library',
   name: 'JAVGG',
   title: 'JAVGG',
-  version: '1.0.8',
+  version: '1.0.9',
   requiredVersion: '0.0.1',
   author: 'Alan huang',
   site: JAVGG_DEFAULT_BASE,
@@ -95,7 +95,7 @@ async function getHomeSection(rawCtx) {
   const ctx = normalizeContext(rawCtx);
   const section = findSection(firstNonEmpty(ctx.sectionId, ctx.id, ctx.pageId)) || JAVGG_SECTIONS[0];
   try {
-    const items = parseCards(ctx, await fetchText(ctx, sectionURL(ctx, section, 1))).slice(0, 18);
+    const items = parseCards(ctx, await fetchSectionText(ctx, section, 1)).slice(0, 18);
     return sectionResult(section, items.length ? items : [diagnosticItem(section.title + '暂无内容')]);
   } catch (error) {
     return sectionResult(section, [diagnosticItem(section.title + '加载失败', error)]);
@@ -111,7 +111,7 @@ async function getCategory(rawCtx) {
   const title = cleanText(firstNonEmpty(ctx.title, section && section.title, dynamicPath && dynamicPath.title, 'JAVGG'));
   const url = section ? sectionURL(ctx, section, page) : pagedURL(baseURL(ctx) + (dynamicPath ? dynamicPath.path : '/new-post/'), page);
   try {
-    const html = await fetchText(ctx, url);
+    const html = section ? await fetchSectionText(ctx, section, page) : await fetchText(ctx, url);
     const items = parseCards(ctx, html);
     return {
       pageType: 'category',
@@ -264,6 +264,11 @@ function sectionShell(section) {
 }
 
 function sectionResult(section, items) {
+  if (section.style === 'discover.ranked') {
+    items = items.map(function (item, index) {
+      return isMediaItem(item) ? Object.assign({}, item, { rank: index + 1 }) : item;
+    });
+  }
   return {
     id: section.id, title: section.title, style: section.style,
     lazy: false, moreAction: categoryAction(section), items: items
@@ -466,6 +471,37 @@ async function fetchText(ctx, url, referer) {
     throw new Error('源站返回了浏览器验证页');
   }
   return text;
+}
+
+// Only the two slow trending lists use bounded retry/cache. Never cache errors
+// or replace a daily/weekly ranking with another category's items.
+const JAVGG_TRENDING_CACHE = Object.create(null);
+const JAVGG_TRENDING_PENDING = Object.create(null);
+
+async function fetchSectionText(ctx, section, page) {
+  const url = sectionURL(ctx, section, page);
+  if (section.id !== 'popular-today' && section.id !== 'popular-weekly') return fetchText(ctx, url);
+  const cached = JAVGG_TRENDING_CACHE[url];
+  if (cached && Date.now() - cached.at < 60000) return cached.html;
+  if (JAVGG_TRENDING_PENDING[url]) return JAVGG_TRENDING_PENDING[url];
+  const pending = withPlaybackBudget(ctx, async function (requestCtx) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const html = await fetchPlaybackText(requestCtx, url, baseURL(ctx) + '/', null, attempt ? 8 : 18, 'trending-http');
+        if (!parseCards(ctx, html).length) throw stageError('trending-empty', '热门榜单没有返回影片条目');
+        JAVGG_TRENDING_CACHE[url] = { at: Date.now(), html: html };
+        const keys = Object.keys(JAVGG_TRENDING_CACHE);
+        if (keys.length > 8) delete JAVGG_TRENDING_CACHE[keys[0]];
+        return html;
+      } catch (error) {
+        const transient = /timeout|timed out|超时|network|网络|ECONN|fetch failed|trending-http-50[234]/i.test(String(error.message || error));
+        if (attempt || !transient) throw error;
+      }
+    }
+  }, '热门榜单加载');
+  JAVGG_TRENDING_PENDING[url] = pending;
+  try { return await pending; }
+  finally { delete JAVGG_TRENDING_PENDING[url]; }
 }
 
 async function httpGet(url, options) {
