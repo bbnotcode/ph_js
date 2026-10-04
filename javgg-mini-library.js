@@ -9,7 +9,7 @@ const WidgetMetadata = {
   id: 'javgg-mini-library',
   name: 'JAVGG',
   title: 'JAVGG',
-  version: '1.0.0',
+  version: '1.0.3',
   requiredVersion: '0.0.1',
   author: 'Alan huang',
   site: JAVGG_DEFAULT_BASE,
@@ -64,10 +64,11 @@ function getManifest() {
 async function getHome(rawCtx) {
   const ctx = normalizeContext(rawCtx);
   let immediate = [];
+  let loadError = '';
   try {
-    immediate = parseCards(ctx, await fetchText(ctx, sectionURL(ctx, JAVGG_SECTIONS[0], 1))).slice(0, 18);
+    immediate = (await fetchListingPage(ctx, sectionURL(ctx, JAVGG_SECTIONS[0], 1))).items.slice(0, 18);
   } catch (error) {
-    immediate = [diagnosticItem('首页加载失败', error)];
+    loadError = error.message || '首页加载失败';
   }
   const browse = {
     id: 'javgg-browse',
@@ -76,11 +77,12 @@ async function getHome(rawCtx) {
     lazy: false,
     items: JAVGG_SECTIONS.map(categoryCard)
   };
-  const first = sectionResult(JAVGG_SECTIONS[0], immediate);
+  const first = sectionResult(JAVGG_SECTIONS[0], immediate, loadError);
   return {
     pageType: 'home',
     id: 'javgg-home',
     title: 'JAVGG',
+    error: loadError || undefined,
     heroAspectRatio: '2:3',
     hero: immediate.filter(isMediaItem).slice(0, 5),
     sections: [browse, first].concat(JAVGG_SECTIONS.slice(1).map(sectionShell))
@@ -91,10 +93,10 @@ async function getHomeSection(rawCtx) {
   const ctx = normalizeContext(rawCtx);
   const section = findSection(firstNonEmpty(ctx.sectionId, ctx.id, ctx.pageId)) || JAVGG_SECTIONS[0];
   try {
-    const items = parseCards(ctx, await fetchText(ctx, sectionURL(ctx, section, 1))).slice(0, 18);
-    return sectionResult(section, items.length ? items : [diagnosticItem(section.title + '暂无内容')]);
+    const items = (await fetchListingPage(ctx, sectionURL(ctx, section, 1))).items.slice(0, 18);
+    return sectionResult(section, items);
   } catch (error) {
-    return sectionResult(section, [diagnosticItem(section.title + '加载失败', error)]);
+    return sectionResult(section, [], error.message || section.title + '加载失败');
   }
 }
 
@@ -107,8 +109,9 @@ async function getCategory(rawCtx) {
   const title = cleanText(firstNonEmpty(ctx.title, section && section.title, dynamicPath && dynamicPath.title, 'JAVGG'));
   const url = section ? sectionURL(ctx, section, page) : pagedURL(baseURL(ctx) + (dynamicPath ? dynamicPath.path : '/new-post/'), page);
   try {
-    const html = await fetchText(ctx, url);
-    const items = parseCards(ctx, html);
+    const listing = await fetchListingPage(ctx, url);
+    const html = listing.html;
+    const items = listing.items;
     return {
       pageType: 'category',
       id: pageId,
@@ -123,8 +126,8 @@ async function getCategory(rawCtx) {
   } catch (error) {
     return {
       pageType: 'category', id: pageId, title: title, style: 'media.posterGrid',
-      itemAspectRatio: '2:3', page: page, hasMore: false,
-      items: [diagnosticItem(title + '加载失败', error)]
+      itemAspectRatio: '2:3', page: page, nextPage: page, hasMore: false,
+      error: error.message || title + '加载失败', items: []
     };
   }
 }
@@ -136,8 +139,9 @@ async function search(rawCtx) {
   if (!query) return { pageType: 'search', title: '搜索', keyword: '', page: page, hasMore: false, items: [] };
   const url = searchURL(ctx, query, page);
   try {
-    const html = await fetchText(ctx, url);
-    const items = parseCards(ctx, html);
+    const listing = await fetchListingPage(ctx, url);
+    const html = listing.html;
+    const items = listing.items;
     return {
       pageType: 'search', title: '搜索：' + query, keyword: query,
       style: 'media.posterGrid', itemAspectRatio: '2:3',
@@ -146,7 +150,8 @@ async function search(rawCtx) {
   } catch (error) {
     return {
       pageType: 'search', title: '搜索：' + query, keyword: query,
-      page: page, hasMore: false, items: [diagnosticItem('搜索失败', error)]
+      page: page, nextPage: page, hasMore: false,
+      error: error.message || '搜索失败', items: []
     };
   }
 }
@@ -279,10 +284,14 @@ function sectionShell(section) {
   };
 }
 
-function sectionResult(section, items) {
+function sectionResult(section, items, error) {
   return {
     id: section.id, title: section.title, style: section.style,
-    lazy: false, moreAction: categoryAction(section), items: items
+    lazy: false, moreAction: categoryAction(section),
+    error: error || undefined, subtitle: error || undefined,
+    items: section.style === 'discover.ranked' ? items.map(function (item, index) {
+      return Object.assign({}, item, { rank: index + 1 });
+    }) : items
   };
 }
 
@@ -448,6 +457,95 @@ function resolveRelativeURL(base, value) {
   const origin = originOf(base);
   if (String(value).indexOf('/') === 0) return origin + value;
   return String(base || '').replace(/[?#].*$/, '').replace(/\/[^/]*$/, '/') + value;
+}
+
+// Only list pages use this bounded HTML fallback. Player/detail requests retain
+// their existing implementation and never enter this list-page browser path.
+async function fetchListingPage(ctx, url) {
+  let httpError;
+  try {
+    return await listingDeadline(async function () {
+      const response = await httpGet(url, {
+        headers: requestHeaders(url), timeout: 6, timeoutSeconds: 6,
+        useBrowserCookie: true, attachBrowserCookie: true,
+        useBrowserFallback: false, browserFallback: false, allowBrowserFallback: false
+      });
+      return readListingResponse(ctx, response, 'http');
+    }, 6, 'http-timeout');
+  } catch (error) {
+    httpError = error || new Error('HTTP 请求失败');
+    if (httpError.status === 404 || httpError.status === 410) throw httpError;
+  }
+  const httpStage = httpError.stage || (/timeout|超时/i.test(String(httpError.message)) ? 'http-timeout' : 'http-error');
+  if (typeof Widget === 'undefined' || !Widget.browser || typeof Widget.browser.fetch !== 'function') {
+    throw listingError(httpStage, '列表读取失败，当前环境没有可用的网页回退');
+  }
+  try {
+    return await listingDeadline(async function () {
+      const response = await Widget.browser.fetch(url, {
+        visible: false, timeout: 12, timeoutSeconds: 12,
+        waitAfterLoad: 1, headers: requestHeaders(url)
+      });
+      return readListingResponse(ctx, response, 'browser');
+    }, 12, 'browser-timeout');
+  } catch (error) {
+    const stage = (error && error.stage) || 'browser-error';
+    throw listingError(stage, '列表读取失败（HTTP阶段：' + httpStage + '）' +
+      (stage === 'browser-verification' ? '，请在原站完成验证后重试' : '，请稍后重试'));
+  }
+}
+
+async function readListingResponse(ctx, response, stage) {
+  const status = Number(response && firstNonEmpty(response.statusCode, response.status)) || 0;
+  const html = await listingResponseText(response, 0);
+  if (/Just a moment|Checking(?:\s+your)?\s+browser|cf-browser-verification|cf-chl-/i.test(html.slice(0, 30000))) {
+    throw listingError(stage + '-verification', '来源需要浏览器验证');
+  }
+  if (status >= 400) throw listingError(stage + '-status', '来源返回 HTTP ' + status, status);
+  const items = parseCards(ctx, html);
+  const emptyList = /<[^>]+class=["'][^"']*\b(?:no-results|noresults|not-found)\b/i.test(html) ||
+    /(?:No results found|Nothing found|No posts found)/i.test(cleanText(html));
+  if (!items.length && !emptyList) throw listingError(stage + '-content', '来源没有返回影片列表');
+  return { html: html, items: items };
+}
+
+async function listingResponseText(response, depth) {
+  if (depth > 4 || response === undefined || response === null) return '';
+  response = await response;
+  if (response === undefined || response === null) return '';
+  if (typeof response === 'string') {
+    if (/^\s*\{/.test(response)) {
+      try { return await listingResponseText(JSON.parse(response), depth + 1); } catch (error) { /* Plain HTML below. */ }
+    }
+    return response;
+  }
+  if (typeof response.text === 'function') return String(await response.text());
+  const keys = ['html', 'data', 'body', 'text', 'content'];
+  for (let index = 0; index < keys.length; index += 1) {
+    if (response[keys[index]] === undefined || response[keys[index]] === null) continue;
+    const text = await listingResponseText(response[keys[index]], depth + 1);
+    if (text) return text;
+  }
+  return '';
+}
+
+function listingError(stage, message, status) {
+  const error = new Error(message + '；stage=' + stage);
+  error.stage = stage;
+  if (status) error.status = status;
+  return error;
+}
+
+async function listingDeadline(operation, seconds, stage) {
+  let timer;
+  try {
+    return await Promise.race([
+      Promise.resolve().then(operation),
+      new Promise(function (_, reject) {
+        timer = setTimeout(function () { reject(listingError(stage, '来源请求超时')); }, seconds * 1000);
+      })
+    ]);
+  } finally { clearTimeout(timer); }
 }
 
 async function fetchText(ctx, url, referer) {

@@ -4,6 +4,16 @@
 
 已经导入 DreamBy 的入口继续使用原来的下载地址和媒体库 ID。每个下载入口都包含完整 JavaScript，不需要远程加载器。
 
+## JAVGG 1.0.3：首页与分类加载修复 — 2026-10-04
+
+用户在 iPhone DreamBy 中报告首页及各分类显示站点 Logo 的失败卡，错误为 `stage=http-timeout`。JAVGG 原版列表请求禁用浏览器回退，HTTP 失败后直接返回错误卡。此次仅修列表读取和失败显示：普通 HTTP 最多 6 秒，包含正文读取；失败或收到验证/不完整页面时，最多一次 12 秒隐藏网页 HTML 回退，不等待视频媒体。正常 HTTP 列表不打开浏览器，可使用宿主提供的正常浏览器会话；不提取或保存 Cookie。
+
+首页仍只立即加载最近发布，其他分区保持懒加载。兼容原始 HTML、嵌套对象/JSON 正文及异步 `text()`。失败返回明确错误和空条目，避免把站点 Logo 的失败提示作为影片或排名内容显示；热门影片提供真实排名。原文件名、库 ID、`baseUrl` 参数、详情/播放载荷保留。
+
+桌面验证：匿名 iPhone User-Agent 的最近发布/第二页及精选页返回 HTTP 200；当前浏览器会话验证八个分类的前两页，第二页均有不同影片。热门分类普通请求出现超时，网页导航曾返回 40 条。67 项离线回归通过，包含 HTTP/正文挂起、一次 HTML 回退、验证页、异步响应、翻页、空搜索及明确失败。iPhone 的网页 HTML 回传和实际列表显示仍需用户更新测试。
+
+播放与详情解析的 19 个相关函数和原恢复版逐字相同；其他九个历史下载入口仍与任务前快照一致。此次列表修复更新为 1.0.3，之前的播放修复没有重新引入。
+
 ## 2026-10-04：更正恢复到任务开始前的版本
 
 用户更正恢复时间为昨天（2026-10-03）开始本轮任务之前。按上海时间 `2026-10-03 00:00:00 +08:00` 之前主分支最后的快照 `2fd0121bfbf0cc812d1e9e39501384710e684ade` 恢复。这十个目标路径与原审查基线 `8e43017532ec81e3338046ba6e32dff7655bd3dd` 完全同字节；两提交之间仅新增另一个库 `hsex-mini-library.js`。
@@ -15,14 +25,14 @@
 | [MissAV download-working](missav-mini-library-download-working.js) / [working 6](missav-mini-library-download-working%206.js) | 1.5.9 |
 | [SexBJCam](sexbjcam-mini-library.js) | 1.1.7 |
 | [ASMRLIB](asmrlib-mini-library.js) | 1.2.0 |
-| [JAVGG](javgg-mini-library.js) | 1.0.0 |
+| [JAVGG](javgg-mini-library.js) | 1.0.3（随后按用户要求修复列表加载） |
 | [麻豆亚洲版](madou8-mini-library%205.js) | 1.1.0 |
 | [套路 SM](taolusm-mini-library.js) | 1.0.0 |
 | [KBJ fan](kbjfan-mini-library.js) | 1.0.0 |
 
 每个文件均恢复该时间点的原始内容、版本号和参数，原 raw 地址与库 ID 保留。MissAV 普通版和 CloudFlare 版虽然版本号相同，内容和参数不同，分别保留；只有内容相同的两个 download-working 文件继续同步。
 
-时间截止点、基线提交及十份文件 SHA-256 记录在 [tools/library-restoration.json](tools/library-restoration.json)。恢复检查校验每个路径的历史内容、真实 manifest、原版公共入口和对应版本行为。此前恢复最早上传版的操作已更正，下文播放修复为撤回的历史记录。
+时间截止点、基线提交及历史文件 SHA-256 记录在 [tools/library-restoration.json](tools/library-restoration.json)。JAVGG 的旧快照移入 `supersededFiles` 并标明此后按用户要求更新到 1.0.3；其余九个入口继续校验历史内容。恢复检查校验每个路径的历史内容、真实 manifest、原版公共入口和对应版本行为。此前恢复最早上传版的操作已更正，下文播放修复为撤回的历史记录。
 
 ## 主维护文件与兼容入口
 

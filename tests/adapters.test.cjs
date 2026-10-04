@@ -237,7 +237,6 @@ const restoredIds = {
   'missav-mini-library.js': 'missav-mini-library',
   'sexbjcam-mini-library.js': 'sexbjcam-mini-library',
   'asmrlib-mini-library.js': 'asmrlib',
-  'javgg-mini-library.js': 'javgg-mini-library',
   'madou8-mini-library 5.js': 'madou8-mini-library',
   'taolusm-mini-library.js': 'taolusm-mini-library',
   'kbjfan-mini-library.js': 'kbjfan-mini-library',
@@ -307,4 +306,125 @@ test('Taolu pre-task snapshot retains its download version and original playback
   const playback = c.resolvePlayback({ itemId: '121576' });
   assert.equal(playback.url, groups[0].versions[0].url);
   assert.equal(playback.container, 'mp4');
+});
+
+function javggListHTML(slugs, next) {
+  return '<html><body><div class="items">' + slugs.map(slug =>
+    '<article class="item movies"><div class="poster"><img data-src="https://img.test/' + slug + '.jpg"></div>' +
+    '<div class="data"><h3><a href="https://javgg.net/jav/' + slug + '/">Video ' + slug + '</a></h3></div></article>'
+  ).join('') + '</div>' + (next ? '<a class="next" href="' + next + '">Next</a>' : '') + '</body></html>';
+}
+function javggListContext() {
+  return load('javgg-mini-library.js', { setTimeout: (fn, ms) => setTimeout(fn, ms / 1000) });
+}
+test('JAVGG list repair retains its imported ID, parameter and superseded snapshot record', () => {
+  const c = javggListContext();
+  assert.equal(c.getManifest().id, 'javgg-mini-library');
+  assert.equal(c.getManifest().version, '1.0.3');
+  assert.deepEqual(plain(c.getManifest().parameters.map(x => x.name)), ['baseUrl']);
+  assert.equal(restoration.supersededFiles['javgg-mini-library.js'].version, '1.0.0');
+  assert.equal(restoration.supersededFiles['javgg-mini-library.js'].replacementVersion, '1.0.3');
+});
+test('JAVGG home uses one ordinary HTTP request and retains real poster and detail actions', async () => {
+  const c = javggListContext(); let http = 0, browser = 0;
+  c.Widget.http.get = async (url, options) => {
+    http++; assert.equal(url, 'https://javgg.net/new-post/');
+    assert.equal(options.timeoutSeconds, 6); assert.equal(options.useBrowserCookie, true);
+    assert.equal(options.browserFallback, false);
+    return { status: 200, data: javggListHTML(['a', 'b', 'c']) };
+  };
+  c.Widget.browser = { async fetch() { browser++; throw new Error('not needed'); } };
+  const home = await c.getHome('{}');
+  assert.equal(http, 1); assert.equal(browser, 0); assert.equal(home.hero.length, 3);
+  assert.equal(home.sections[1].items[0].poster, 'https://img.test/a.jpg');
+  assert.equal(c.detailURLFromId(home.hero[0].action.itemId), 'https://javgg.net/jav/a/');
+  assert.equal(home.sections.filter(x => x.lazy).length, 9); assert.equal(home.error, undefined);
+});
+test('JAVGG hung HTTP gets exactly one bounded HTML browser fallback without media capture', async () => {
+  const c = javggListContext(); let browser = 0;
+  c.Widget.http.get = () => new Promise(() => {});
+  c.Widget.browser = { async fetch(url, options) {
+    browser++; assert.equal(url, 'https://javgg.net/new-post/');
+    assert.equal(options.timeoutSeconds, 12); assert.equal(options.visible, false);
+    assert.equal(options.waitForMediaSource, undefined); assert.equal(options.captureMedia, undefined);
+    return { html: javggListHTML(['recovered']) };
+  } };
+  const home = await c.getHome({});
+  assert.equal(browser, 1); assert.equal(home.hero.length, 1); assert.equal(home.error, undefined);
+});
+test('JAVGG host http-timeout error and async browser body recover the requested category', async () => {
+  const c = javggListContext(); const requests = [];
+  c.Widget.http.get = async () => { throw new Error('来源请求超时；stage=http-timeout'); };
+  c.Widget.browser = { async fetch(url) { requests.push(url); return { statusCode: 200, async text() { return javggListHTML(['weekly']); } }; } };
+  const page = await c.getCategory({ pageId: 'popular-weekly', page: 2 });
+  assert.deepEqual(requests, ['https://javgg.net/trending/page/2/?sort=weekly']);
+  assert.equal(page.items.length, 1); assert.equal(page.page, 2); assert.equal(page.error, undefined);
+});
+test('JAVGG Checking Browser pivots to HTML; ordinary Cloudflare jsd does not', async () => {
+  const c = javggListContext(); let browser = 0;
+  c.Widget.http.get = async () => ({ status: 200, data: '<html><title>Checking Browser</title></html>' });
+  c.Widget.browser = { async fetch() { browser++; return { body: { html: javggListHTML(['verified']) } }; } };
+  assert.equal((await c.getHomeSection({ sectionId: 'featured' })).items.length, 1);
+  c.Widget.http.get = async () => ({ status: 200, data: javggListHTML(['plain']) + '<script src="/cdn-cgi/challenge-platform/scripts/jsd/main.js"></script>' });
+  assert.equal((await c.getHomeSection({ sectionId: 'featured' })).items.length, 1);
+  assert.equal(browser, 1);
+});
+test('JAVGG total listing wait includes a hanging HTTP response body', async () => {
+  const c = javggListContext(); let browser = 0;
+  c.Widget.http.get = async () => ({ status: 200, text() { return new Promise(() => {}); } });
+  c.Widget.browser = { async fetch() { browser++; return javggListHTML(['body-recovery']); } };
+  assert.equal((await c.getHomeSection({ sectionId: 'new-post' })).items.length, 1);
+  assert.equal(browser, 1);
+});
+test('JAVGG nested JSON and promise body responses retain real pagination and ranked items', async () => {
+  const c = javggListContext(); const requested = [];
+  c.Widget.http.get = async url => {
+    requested.push(url);
+    const second = url.includes('/page/2/');
+    return { statusCode: 200, body: Promise.resolve(JSON.stringify({ data: { html: javggListHTML([second ? 'two' : 'one'], second ? '' : 'https://javgg.net/trending/page/2/?sort=today') } })) };
+  };
+  const first = await c.getCategory({ pageId: 'popular-today', page: 1 });
+  const second = await c.getCategory(JSON.stringify({ pageId: 'popular-today', page: 2 }));
+  assert.equal(first.hasMore, true); assert.equal(second.hasMore, false);
+  assert.notEqual(first.items[0].id, second.items[0].id);
+  assert.deepEqual(requested, ['https://javgg.net/trending/?sort=today', 'https://javgg.net/trending/page/2/?sort=today']);
+  const ranked = await c.getHomeSection({ sectionId: 'popular-today' });
+  assert.equal(ranked.items[0].rank, 1);
+});
+test('JAVGG listing failure returns explicit error and no fake failure artwork', async () => {
+  const c = javggListContext(); let browser = 0;
+  c.Widget.http.get = async () => { throw new Error('timeout'); };
+  c.Widget.browser = { fetch() { browser++; return new Promise(() => {}); } };
+  const home = await c.getHome({});
+  assert.match(home.error, /stage=browser-timeout/); assert.equal(home.hero.length, 0);
+  assert.equal(home.sections[1].items.length, 0); assert.match(home.sections[1].error, /http-timeout/);
+  const section = await c.getHomeSection({ sectionId: 'featured' });
+  assert.equal(section.items.length, 0); assert.ok(section.error);
+  assert.equal(browser, 2);
+});
+test('JAVGG genuine not-found page fails without a browser retry or advancing pagination', async () => {
+  const c = javggListContext(); let browser = 0;
+  c.Widget.http.get = async () => ({ status: 404, data: '<html>Not found</html>' });
+  c.Widget.browser = { async fetch() { browser++; return javggListHTML(['wrong']); } };
+  const page = await c.getCategory({ pageId: 'new-post', page: 2 });
+  assert.equal(page.items.length, 0); assert.equal(page.nextPage, 2);
+  assert.match(page.error, /HTTP 404/); assert.equal(browser, 0);
+});
+test('JAVGG browser verification stays a visible error and cannot become an empty success', async () => {
+  const c = javggListContext();
+  c.Widget.http.get = async () => ({ status: 403, data: '<html>Checking Browser</html>' });
+  c.Widget.browser = { async fetch() { return { status: 403, html: '<html>Just a moment</html>' }; } };
+  const page = await c.getCategory({ pageId: 'featured' });
+  assert.equal(page.items.length, 0); assert.match(page.error, /browser-verification/);
+  assert.match(page.error, /完成验证/);
+});
+test('JAVGG empty real search results are valid while missing browser support reports the HTTP stage', async () => {
+  const c = javggListContext(); const urls = [];
+  c.Widget.http.get = async url => { urls.push(url); return { status: 200, data: '<html><body><div class="no-results">Nothing found</div></body></html>' }; };
+  const result = await c.search({ query: 'A&B #tag', page: 2 });
+  assert.equal(result.items.length, 0); assert.equal(result.error, undefined);
+  assert.deepEqual(urls, ['https://javgg.net/page/2/?s=A%26B%20%23tag']);
+  c.Widget.http.get = async () => { throw new Error('stage=http-timeout'); };
+  const failed = await c.getCategory({ pageId: 'new-post' });
+  assert.equal(failed.items.length, 0); assert.match(failed.error, /stage=http-timeout/);
 });
