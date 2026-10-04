@@ -314,117 +314,199 @@ function javggListHTML(slugs, next) {
     '<div class="data"><h3><a href="https://javgg.net/jav/' + slug + '/">Video ' + slug + '</a></h3></div></article>'
   ).join('') + '</div>' + (next ? '<a class="next" href="' + next + '">Next</a>' : '') + '</body></html>';
 }
-function javggListContext() {
-  return load('javgg-mini-library.js', { setTimeout: (fn, ms) => setTimeout(fn, ms / 1000) });
+function javggDetail(lines = ['VH', 'playmate', 'luluvdoo', 'SW']) {
+  return '<div id="dooplay_player_content"><ul>' + lines.map((line, i) =>
+    `<li data-nume="${i + 1}" data-post="579441" class="dooplay_player_option"><span class="title">Server</span><span class="server">${line}</span></li>`).join('') + '</ul>' + lines.map((line, i) =>
+    `<div class="source-box" id="source-player-${i + 1}"><div class="pframe"><iframe src="https://player${i + 1}.test/e/film"></iframe></div></div>`).join('') + '</div>';
 }
-test('JAVGG list repair retains its imported ID, parameter and superseded snapshot record', () => {
-  const c = javggListContext();
-  assert.equal(c.getManifest().id, 'javgg-mini-library');
-  assert.equal(c.getManifest().version, '1.0.3');
-  assert.deepEqual(plain(c.getManifest().parameters.map(x => x.name)), ['baseUrl']);
-  assert.equal(restoration.supersededFiles['javgg-mini-library.js'].version, '1.0.0');
-  assert.equal(restoration.supersededFiles['javgg-mini-library.js'].replacementVersion, '1.0.3');
+function packedJavgg(host = 'cdn', file = 'master', signature = 'fresh') {
+  return `eval(function(p,a,c,k,e,d){return p;}('0({1:[{2:"3://4.5/6.7?8=9"}]});',36,10,'setup|sources|file|https|${host}|test|${file}|m3u8|sign|${signature}'.split('|'),0,{}))`;
+}
+
+test('JAVGG maps real server labels to numbered frames, despite missing/reordered frames', () => {
+  const c = load('javgg-mini-library.js');
+  const source = javggDetail().replace(/<div class="source-box" id="source-player-1">[\s\S]*?<\/div><\/div>/, '');
+  const players = c.parsePlayers(source);
+  assert.deepEqual(plain(players.map(x => [x.lineId, x.line])), [['2','playmate'],['3','luluvdoo'],['4','SW']]);
+  assert.equal(players[0].url, 'https://player2.test/e/film');
+  const groups = players.map(x => c.qualityGroup('https://javgg.net/jav/a/', 'A', x, [{name:'720p',height:720}]));
+  assert.equal(new Set(groups.map(x => x.id)).size, 3);
 });
-test('JAVGG home uses one ordinary HTTP request and retains real poster and detail actions', async () => {
-  const c = javggListContext(); let http = 0, browser = 0;
-  c.Widget.http.get = async (url, options) => {
-    http++; assert.equal(url, 'https://javgg.net/new-post/');
-    assert.equal(options.timeoutSeconds, 6); assert.equal(options.useBrowserCookie, true);
-    assert.equal(options.browserFallback, false);
-    return { status: 200, data: javggListHTML(['a', 'b', 'c']) };
-  };
-  c.Widget.browser = { async fetch() { browser++; throw new Error('not needed'); } };
-  const home = await c.getHome('{}');
-  assert.equal(http, 1); assert.equal(browser, 0); assert.equal(home.hero.length, 3);
-  assert.equal(home.sections[1].items[0].poster, 'https://img.test/a.jpg');
-  assert.equal(c.detailURLFromId(home.hero[0].action.itemId), 'https://javgg.net/jav/a/');
-  assert.equal(home.sections.filter(x => x.lazy).length, 9); assert.equal(home.error, undefined);
-});
-test('JAVGG hung HTTP gets exactly one bounded HTML browser fallback without media capture', async () => {
-  const c = javggListContext(); let browser = 0;
-  c.Widget.http.get = () => new Promise(() => {});
-  c.Widget.browser = { async fetch(url, options) {
-    browser++; assert.equal(url, 'https://javgg.net/new-post/');
-    assert.equal(options.timeoutSeconds, 12); assert.equal(options.visible, false);
-    assert.equal(options.waitForMediaSource, undefined); assert.equal(options.captureMedia, undefined);
-    return { html: javggListHTML(['recovered']) };
-  } };
-  const home = await c.getHome({});
-  assert.equal(browser, 1); assert.equal(home.hero.length, 1); assert.equal(home.error, undefined);
-});
-test('JAVGG host http-timeout error and async browser body recover the requested category', async () => {
-  const c = javggListContext(); const requests = [];
-  c.Widget.http.get = async () => { throw new Error('来源请求超时；stage=http-timeout'); };
-  c.Widget.browser = { async fetch(url) { requests.push(url); return { statusCode: 200, async text() { return javggListHTML(['weekly']); } }; } };
-  const page = await c.getCategory({ pageId: 'popular-weekly', page: 2 });
-  assert.deepEqual(requests, ['https://javgg.net/trending/page/2/?sort=weekly']);
-  assert.equal(page.items.length, 1); assert.equal(page.page, 2); assert.equal(page.error, undefined);
-});
-test('JAVGG Checking Browser pivots to HTML; ordinary Cloudflare jsd does not', async () => {
-  const c = javggListContext(); let browser = 0;
-  c.Widget.http.get = async () => ({ status: 200, data: '<html><title>Checking Browser</title></html>' });
-  c.Widget.browser = { async fetch() { browser++; return { body: { html: javggListHTML(['verified']) } }; } };
-  assert.equal((await c.getHomeSection({ sectionId: 'featured' })).items.length, 1);
-  c.Widget.http.get = async () => ({ status: 200, data: javggListHTML(['plain']) + '<script src="/cdn-cgi/challenge-platform/scripts/jsd/main.js"></script>' });
-  assert.equal((await c.getHomeSection({ sectionId: 'featured' })).items.length, 1);
-  assert.equal(browser, 1);
-});
-test('JAVGG total listing wait includes a hanging HTTP response body', async () => {
-  const c = javggListContext(); let browser = 0;
-  c.Widget.http.get = async () => ({ status: 200, text() { return new Promise(() => {}); } });
-  c.Widget.browser = { async fetch() { browser++; return javggListHTML(['body-recovery']); } };
-  assert.equal((await c.getHomeSection({ sectionId: 'new-post' })).items.length, 1);
-  assert.equal(browser, 1);
-});
-test('JAVGG nested JSON and promise body responses retain real pagination and ranked items', async () => {
-  const c = javggListContext(); const requested = [];
+
+test('JAVGG discovers packed HLS qualities while hung and empty players fail independently', async () => {
+  const c = load('javgg-mini-library.js', { setTimeout: (fn, ms) => setTimeout(fn, ms / 100) });
+  let active = 0, max = 0, browsers = 0;
+  c.Widget.browser = { async fetch() { browsers++; throw new Error('should not be needed'); } };
   c.Widget.http.get = async url => {
-    requested.push(url);
-    const second = url.includes('/page/2/');
-    return { statusCode: 200, body: Promise.resolve(JSON.stringify({ data: { html: javggListHTML([second ? 'two' : 'one'], second ? '' : 'https://javgg.net/trending/page/2/?sort=today') } })) };
+    if (url.includes('/jav/')) return {statusCode:200,data:javggDetail()};
+    if (url.includes('player1')) return new Promise(() => {});
+    active++; max = Math.max(active, max); await Promise.resolve(); active--;
+    if (url.includes('player2')) return {statusCode:200,data:'<html>dynamic player</html>'};
+    if (url.includes('player3')) return {statusCode:200,data:packedJavgg('lulu')};
+    if (url.includes('player4')) return {statusCode:200,data:packedJavgg('sw')};
+    return {statusCode:200,data:url.includes('lulu') ? master.split('#EXT-X-STREAM-INF:BANDWIDTH=900000')[0] : master};
   };
-  const first = await c.getCategory({ pageId: 'popular-today', page: 1 });
-  const second = await c.getCategory(JSON.stringify({ pageId: 'popular-today', page: 2 }));
-  assert.equal(first.hasMore, true); assert.equal(second.hasMore, false);
-  assert.notEqual(first.items[0].id, second.items[0].id);
-  assert.deepEqual(requested, ['https://javgg.net/trending/?sort=today', 'https://javgg.net/trending/page/2/?sort=today']);
-  const ranked = await c.getHomeSection({ sectionId: 'popular-today' });
-  assert.equal(ranked.items[0].rank, 1);
+  const groups = await c.getResourceVersions(JSON.stringify({detailUrl:'https://javgg.net/jav/a/'}));
+  assert.deepEqual(plain(groups.map(x => x.title)), ['luluvdoo 线路','SW 线路']);
+  assert.deepEqual(plain(groups[1].versions.map(x => x.name)), ['1080p','720p']);
+  assert.equal(groups[1].versions.filter(x => x.default).length, 1);
+  assert.equal(browsers, 0); assert.ok(max <= 2);
+  const payload = c.decodePayload(groups[1].versions[1].id);
+  assert.equal(payload.height,720); assert.equal(payload.lineId,'4'); assert.equal(payload.playerUrl,'https://player4.test/e/film');
+  assert.ok(!groups[1].versions[0].id.includes('sign'));
 });
-test('JAVGG listing failure returns explicit error and no fake failure artwork', async () => {
-  const c = javggListContext(); let browser = 0;
-  c.Widget.http.get = async () => { throw new Error('timeout'); };
-  c.Widget.browser = { fetch() { browser++; return new Promise(() => {}); } };
-  const home = await c.getHome({});
-  assert.match(home.error, /stage=browser-timeout/); assert.equal(home.hero.length, 0);
-  assert.equal(home.sections[1].items.length, 0); assert.match(home.sections[1].error, /http-timeout/);
-  const section = await c.getHomeSection({ sectionId: 'featured' });
-  assert.equal(section.items.length, 0); assert.ok(section.error);
-  assert.equal(browser, 2);
+
+test('JAVGG refreshes signed packed URLs and selects highest / requested / missing quality', async () => {
+  const c = load('javgg-mini-library.js'); let refreshes = 0;
+  c.Widget.http.get = async url => url.includes('player.test') ? {status:200,data:packedJavgg('cdn','master','fresh'+(++refreshes))} : {status:200,data:master};
+  for (const height of [0,720,2160,1080]) {
+    const result = await c.resolvePlayback({versionId:c.encodePayload({kind:'play',detailUrl:'https://javgg.net/jav/a/',playerUrl:'https://player.test/e/a',line:'Server',height})});
+    assert.equal(result.url, 'https://cdn.test/' + (height === 720 ? '720' : '1080') + '.m3u8');
+  }
+  assert.equal(refreshes,4);
 });
-test('JAVGG genuine not-found page fails without a browser retry or advancing pagination', async () => {
-  const c = javggListContext(); let browser = 0;
-  c.Widget.http.get = async () => ({ status: 404, data: '<html>Not found</html>' });
-  c.Widget.browser = { async fetch() { browser++; return javggListHTML(['wrong']); } };
-  const page = await c.getCategory({ pageId: 'new-post', page: 2 });
-  assert.equal(page.items.length, 0); assert.equal(page.nextPage, 2);
-  assert.match(page.error, /HTTP 404/); assert.equal(browser, 0);
+
+test('JAVGG does not execute packed scripts or accept unbounded packing dictionaries', () => {
+  const c = load('javgg-mini-library.js');
+  assert.equal(c.extractPlayableURL(packedJavgg()),'https://cdn.test/master.m3u8?sign=fresh');
+  assert.equal(c.extractPlayableURL(packedJavgg().replace('return p;', 'globalThis.compromised=true;return p;')),'https://cdn.test/master.m3u8?sign=fresh');
+  assert.equal(c.compromised,undefined);
+  assert.equal(c.extractPlayableURL(packedJavgg().replace(',36,10,', ',36,200000,')), '');
 });
-test('JAVGG browser verification stays a visible error and cannot become an empty success', async () => {
-  const c = javggListContext();
-  c.Widget.http.get = async () => ({ status: 403, data: '<html>Checking Browser</html>' });
-  c.Widget.browser = { async fetch() { return { status: 403, html: '<html>Just a moment</html>' }; } };
-  const page = await c.getCategory({ pageId: 'featured' });
-  assert.equal(page.items.length, 0); assert.match(page.error, /browser-verification/);
-  assert.match(page.error, /完成验证/);
+
+test('JAVGG rejects expired 404 manifests, retries fresh discovery, and leaves detail resources empty', async () => {
+  const c = load('javgg-mini-library.js'); let available = false;
+  c.Widget.http.get = async url => url.includes('/jav/') ? {status:200,data:javggDetail(['SW'])} : url.includes('player1') ? {status:200,data:packedJavgg()} : {statusCode:available ? 200 : 404,data:available ? media : '<html>Not Found</html>'};
+  const ctx={detailUrl:'https://javgg.net/jav/a/'};
+  assert.equal((await c.getDetail(ctx)).resourceGroups.length,0);
+  await assert.rejects(c.getResourceVersions(ctx), /manifest-http-404/);
+  available=true;
+  const groups=await c.getResourceVersions(ctx);assert.equal(groups[0].versions[0].name,'HLS 原始画质');
 });
-test('JAVGG empty real search results are valid while missing browser support reports the HTTP stage', async () => {
-  const c = javggListContext(); const urls = [];
-  c.Widget.http.get = async url => { urls.push(url); return { status: 200, data: '<html><body><div class="no-results">Nothing found</div></body></html>' }; };
-  const result = await c.search({ query: 'A&B #tag', page: 2 });
-  assert.equal(result.items.length, 0); assert.equal(result.error, undefined);
-  assert.deepEqual(urls, ['https://javgg.net/page/2/?s=A%26B%20%23tag']);
-  c.Widget.http.get = async () => { throw new Error('stage=http-timeout'); };
-  const failed = await c.getCategory({ pageId: 'new-post' });
-  assert.equal(failed.items.length, 0); assert.match(failed.error, /stage=http-timeout/);
+
+test('JAVGG captures real browser request headers once, then resolves a lower quality', async () => {
+  const c=load('javgg-mini-library.js'); let browsers=0; const manifestHeaders=[];
+  c.Widget.http.get=async (url, options)=>{
+    if(url.includes('/jav/')) return {status:200,data:javggDetail(['playmate'])};
+    if(url.includes('player1')) return {status:200,data:'<html>dynamic</html>'};
+    manifestHeaders.push(options.headers);return {status:200,data:master};
+  };
+  c.Widget.browser={async fetch(url,options){browsers++;assert.equal(options.visible,false);assert.equal(options.waitForAny,undefined);assert.ok(options.timeout<=10);return {capturedRequests:[{url:'https://cdn.test/master.m3u8?fresh=1',requestHeaders:{referer:'https://actual-player.test/',origin:'https://actual-player.test','user-agent':'Actual Agent',cookie:'fixture-only','Authorization':'must-not-forward'}}]};}};
+  const groups=await c.getResourceVersions({detailUrl:'https://javgg.net/jav/a/'});
+  const result=await c.resolvePlayback(groups[0].versions[1].action);
+  assert.equal(result.url,'https://cdn.test/720.m3u8');assert.equal(browsers,2);
+  assert.deepEqual(plain(result.headers),{'User-Agent':'Actual Agent',Referer:'https://actual-player.test/',Origin:'https://actual-player.test',Cookie:'fixture-only'});
+  assert.ok(manifestHeaders.every(h=>h.Referer==='https://actual-player.test/'));
+});
+
+test('JAVGG bounds a hung native browser and identifies capture failure without exposing tokens', async () => {
+  const c=load('javgg-mini-library.js',{setTimeout:(fn,ms)=>setTimeout(fn,ms/100)});let browsers=0;
+  c.Widget.http.get=async url=>({status:200,data:url.includes('/jav/')?javggDetail(): '<html>dynamic</html>'});
+  c.Widget.browser={async fetch(){browsers++;return new Promise(()=>{});}};
+  const start=Date.now();await assert.rejects(c.getResourceVersions({detailUrl:'https://javgg.net/jav/a/'}),/browser-media-timeout/);
+  assert.equal(browsers,1);assert.ok(Date.now()-start<500);
+  c.Widget.browser.fetch=async()=>({mediaSources:['blob:https://player.test/id'],secret:'must-not-leak'});
+  await assert.rejects(c.resolvePlayback({playerUrl:'https://player.test/e/a'}),e=>/browser-.*media|browser-blob/.test(e.message)&&!e.message.includes('must-not-leak'));
+});
+
+test('JAVGG quality discovery itself has an overall deadline', async () => {
+  const c=load('javgg-mini-library.js',{setTimeout:fn=>setTimeout(fn,15)});
+  c.discoverResourceVersions=async()=>new Promise(()=>{});
+  await assert.rejects(c.getResourceVersions({}),/画质发现超时.*total-deadline/);
+});
+
+test('JAVGG direct detail Play explores later lines and selects the highest real quality', async () => {
+  const c=load('javgg-mini-library.js');
+  c.Widget.http.get=async url=>{
+    if(url.includes('/jav/')) return {status:200,data:javggDetail(['luluvdoo','SW'])};
+    if(url.includes('player1')) return {status:200,data:packedJavgg('low')};
+    if(url.includes('player2')) return {status:200,data:packedJavgg('high')};
+    return {status:200,data:url.includes('low')?master.replace(/1920x1080/g,'1280x720').replace(/1080.m3u8/g,'720.m3u8'):master};
+  };
+  const result=await c.resolvePlayback({itemId:c.encodePayload({kind:'detail',detailUrl:'https://javgg.net/jav/a/'})});
+  assert.equal(result.url,'https://high.test/1080.m3u8');
+});
+
+test('JAVGG playback fails explicitly when a fresh manifest is permanently unavailable', async () => {
+  const c=load('javgg-mini-library.js');
+  c.Widget.http.get=async url=>url.includes('player.test')?{status:200,data:packedJavgg()}:{statusCode:404,data:'Not Found'};
+  await assert.rejects(c.resolvePlayback({playerUrl:'https://player.test/e/a'}),/manifest-http-404/);
+});
+
+test('JAVGG uses observed luluvdoo headers and does not invent headers for other players', () => {
+  const c=load('javgg-mini-library.js');
+  const known=c.playbackHeaders('https://luluvdoo.com/e/film');
+  assert.equal(known.Referer,'https://luluvdoo.com/');assert.equal(known.Origin,'https://luluvdoo.com');
+  const other=c.playbackHeaders('https://javstreamhq.xyz/e/film');
+  assert.equal(other.Origin,undefined);assert.equal(other.Referer,undefined);
+});
+
+test('JAVGG 1.0.4 keeps the imported identity and records the user requested replacement', () => {
+  const c = load('javgg-mini-library.js');
+  assert.equal(c.getManifest().id, 'javgg-mini-library');
+  assert.equal(c.getManifest().version, '1.0.4');
+  assert.deepEqual(plain(c.getManifest().parameters.map(x => x.name)), ['baseUrl']);
+  assert.equal(restoration.supersededFiles['javgg-mini-library.js'].replacementVersion, '1.0.4');
+});
+test('JAVGG working home keeps its original HTTP options, real cards and lazy sections', async () => {
+  const c=load('javgg-mini-library.js');let http=0,browser=0;
+  c.Widget.http.get=async(url,options)=>{
+    http++;assert.equal(url,'https://javgg.net/new-post/');
+    assert.equal(options.useBrowserCookie,false);assert.equal(options.browserFallback,false);
+    assert.equal(options.timeout,undefined);assert.equal(options.timeoutSeconds,undefined);
+    return {data:javggListHTML(['a','b','c'])};
+  };
+  c.Widget.browser={async fetch(){browser++;throw Error('list must stay on working path');}};
+  const home=await c.getHome('{}');
+  assert.equal(http,1);assert.equal(browser,0);assert.equal(home.hero.length,3);
+  assert.equal(home.sections[1].items[0].poster,'https://img.test/a.jpg');
+  assert.equal(c.detailURLFromId(home.hero[0].action.itemId),'https://javgg.net/jav/a/');
+  assert.equal(home.sections.filter(s=>s.lazy).length,9);
+});
+test('JAVGG working category and search keep page two URLs and distinct detail IDs', async () => {
+  const c=load('javgg-mini-library.js');const urls=[];
+  c.Widget.http.get=async url=>{
+    urls.push(url);return {data:javggListHTML([url.includes('/page/2/')?'two':'one'],url.includes('/page/2/')?'':'/page/2/')};
+  };
+  const first=await c.getCategory({pageId:'popular-weekly',page:1});
+  const second=await c.getCategory(JSON.stringify({pageId:'popular-weekly',page:2}));
+  assert.notEqual(first.items[0].id,second.items[0].id);
+  assert.equal(first.hasMore,true);assert.equal(second.hasMore,false);
+  await c.search({query:'A&B #tag',page:2});
+  assert.deepEqual(urls,['https://javgg.net/trending/?sort=weekly','https://javgg.net/trending/page/2/?sort=weekly','https://javgg.net/page/2/?s=A%26B%20%23tag']);
+});
+test('JAVGG five current server labels stay associated when a container has no iframe', () => {
+  const c=load('javgg-mini-library.js');
+  const html=javggDetail(['vidhide','f4scom','streamwish','playmate','luluvdoo'])
+    .replace('<iframe src="https://player2.test/e/film"></iframe>','');
+  const players=c.parsePlayers(html);
+  assert.deepEqual(plain(players.map(p=>[p.lineId,p.line])),[['1','vidhide'],['3','streamwish'],['4','playmate'],['5','luluvdoo']]);
+});
+test('JAVGG playback awaits asynchronous response bodies while list HTTP stays separate', async () => {
+  const c=load('javgg-mini-library.js');
+  c.Widget.http.get=async url=>url.includes('player.test') ? {statusCode:200,body:Promise.resolve(JSON.stringify({data:{html:packedJavgg()}}))} : {status:200,async text(){return master;}};
+  const result=await c.resolvePlayback({versionId:c.encodePayload({playerUrl:'https://player.test/e/abc',height:720})});
+  assert.match(result.url,/720\.m3u8$/);assert.equal(result.container,'m3u8');
+});
+test('JAVGG a hanging HTTP body times out and permits only one captured-media fallback', async () => {
+  const c=load('javgg-mini-library.js',{setTimeout:(fn,ms)=>setTimeout(fn,ms/100)});let browser=0;
+  c.Widget.http.get=async url=>url.includes('player.test') ? {text(){return new Promise(()=>{});}} : {data:media};
+  c.Widget.browser={async fetch(url,options){browser++;assert.ok(options.timeoutSeconds<=10);assert.equal(options.waitForAny,undefined);
+    return {capturedRequests:[{url:'https://cdn.test/fresh.m3u8',requestHeaders:{Referer:'https://player.test/'}}]};}};
+  const result=await c.resolvePlayback({versionId:c.encodePayload({playerUrl:'https://player.test/e/abc'})});
+  assert.equal(browser,1);assert.equal(result.url,'https://cdn.test/fresh.m3u8');
+  assert.equal(result.headers.Referer,'https://player.test/');
+});
+test('JAVGG a hanging browser body fails within its capture stage', async () => {
+  const c=load('javgg-mini-library.js',{setTimeout:(fn,ms)=>setTimeout(fn,ms/100)});let browser=0;
+  c.Widget.http.get=async()=>({data:'<html>dynamic player</html>'});
+  c.Widget.browser={async fetch(){browser++;return {text(){return new Promise(()=>{});}};}};
+  await assert.rejects(c.resolvePlayback({versionId:c.encodePayload({playerUrl:'https://player.test/e/abc'})}),/stage=browser-media-timeout/);
+  assert.equal(browser,1);
+});
+test('JAVGG browser blob-only output reports a capability failure without fake media', async () => {
+  const c=load('javgg-mini-library.js');
+  c.Widget.http.get=async()=>({data:'<html>dynamic player</html>'});
+  c.Widget.browser={async fetch(){return {mediaSources:['blob:https://player.test/example'],html:'<video src="blob:https://player.test/example">'};}};
+  await assert.rejects(c.resolvePlayback({versionId:c.encodePayload({playerUrl:'https://player.test/e/abc'})}),/stage=browser-blob-only/);
 });
