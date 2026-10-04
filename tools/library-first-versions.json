@@ -1,0 +1,44 @@
+{
+  "missav-mini-library.js": {
+    "commit": "a44d25631a06c29b4491610c96c965bb03c9711d",
+    "version": "1.0.0",
+    "sha256": "5fa423c1762260c0ad39f50a7581b22b5036442e2021b593c3ab114afc2e9b53",
+    "sourcePath": "missav-mini-library.js"
+  },
+  "sexbjcam-mini-library.js": {
+    "commit": "420f4fa2a5812cb647249a184f59696cbbdb02fb",
+    "version": "1.1.3",
+    "sha256": "7b682e9a1791655dab2ccfc14aafa736c1e82026a21bf39125b3e251a41383a5",
+    "sourcePath": "sexbjcam-mini-library.js"
+  },
+  "asmrlib-mini-library.js": {
+    "commit": "4a2ece99e4af217c1509c522c0d84d276b068b08",
+    "version": "1.2.0",
+    "sha256": "2cb404dbbab67626d762248dbe050ab7e534ea68278ff745c5d304b6a487faa0",
+    "sourcePath": "asmrlib-mini-library.js"
+  },
+  "javgg-mini-library.js": {
+    "commit": "b17286ba023d392cf9a6e3935590e2bc5c528b06",
+    "version": "1.0.0",
+    "sha256": "39092a7afb7107182c33fc923d93cb99c20ea3fb97d01810ef1f4e974de8885e",
+    "sourcePath": "javgg-mini-library.js"
+  },
+  "madou8-mini-library 5.js": {
+    "commit": "2a16937466dfbb908ae1bab6a1347569299df1df",
+    "sourcePath": "madou8-mini-library.js",
+    "version": "1.0.1",
+    "sha256": "806590d98c709021d198d6720c396bce0a8bdaeb8415475841384fb44cde83bf"
+  },
+  "taolusm-mini-library.js": {
+    "commit": "fbb65e110e60561c4a557adb42c80dc2e173505f",
+    "version": "1.0.0",
+    "sha256": "04646ae4b033e37719291cb196bcecb11b9c0917d065eb29b97cf4e15c9ddc8f",
+    "sourcePath": "taolusm-mini-library.js"
+  },
+  "kbjfan-mini-library.js": {
+    "commit": "e943d616e2df05c3abf6fdf2a716780c9d6a0aff",
+    "version": "1.0.0",
+    "sha256": "761d79a9a4e96ced1484bede83d123dc6cc9af5cc94f13fdc49bc26f84b810e1",
+    "sourcePath": "kbjfan-mini-library.js"
+  }
+}

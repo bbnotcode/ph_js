@@ -9,8 +9,8 @@ const WidgetMetadata = {
   id: 'taolusm-mini-library',
   name: '套路SM',
   title: '套路SM',
-  version: '1.0.2',
-  author: 'Alan huang',
+  version: '1.0.0',
+  author: 'EL',
   logo: TAOLUSM_LOGO,
   icon: TAOLUSM_LOGO,
   site: TAOLUSM_DEFAULT_BASE,
@@ -71,7 +71,6 @@ function getManifest() {
 }
 
 async function getHome(ctx) {
-  ctx = normalizeRuntimeContext(ctx);
   let latestItems = [];
   try {
     const html = await fetchText(ctx, categoryURL(ctx, '/'));
@@ -111,7 +110,6 @@ async function getHome(ctx) {
 }
 
 async function getHomeSection(ctx) {
-  ctx = normalizeRuntimeContext(ctx);
   const sectionId = stringValue(ctx && (ctx.sectionId || ctx.id));
   const section = findSection(sectionId) || TAOLUSM_SECTIONS[0];
   try {
@@ -130,7 +128,6 @@ async function getHomeSection(ctx) {
 }
 
 async function getCategory(ctx) {
-  ctx = normalizeRuntimeContext(ctx);
   const page = positiveInt(contextValue(ctx, 'page'), 1);
   const pageId = normalizePageId(ctx && (ctx.pageId || ctx.id || ctx.category || ctx.genreId));
   const section = findSection(pageId) || TAOLUSM_SECTIONS[0];
@@ -151,7 +148,6 @@ async function getCategory(ctx) {
 }
 
 async function getDetail(ctx) {
-  ctx = normalizeRuntimeContext(ctx);
   const id = itemIdFromContext(ctx);
   if (!id) throw new Error('套路SM 详情参数无效');
 
@@ -176,7 +172,6 @@ async function getDetail(ctx) {
     .filter(function (item) { return item.id !== id; })
     .slice(0, 18);
   const headers = mediaHeaders(ctx);
-  const source = parsePlaybackSource(html, id);
 
   return {
     id: id,
@@ -188,8 +183,8 @@ async function getDetail(ctx) {
     posterHeaders: headers,
     backdropHeaders: headers,
     detailImageAspectRatio: '16:9',
-    overview: [source.preview ? '公开预览；完整影片需要站点登录及观看权限。' : '', overview].filter(Boolean).join('\n'),
-    resourceGroups: resourceGroupsFor(ctx, id, title, source),
+    overview: overview,
+    resourceGroups: resourceGroupsFor(ctx, id, title),
     recommendations: recommendations.length ? [
       {
         id: 'related',
@@ -201,48 +196,27 @@ async function getDetail(ctx) {
   };
 }
 
-async function getResourceVersions(ctx) {
-  ctx = normalizeRuntimeContext(ctx);
+function getResourceVersions(ctx) {
   const id = itemIdFromContext(ctx);
   if (!id) return [];
-  const html = await fetchText(ctx, baseURL(ctx) + '/v/' + encodeURIComponent(id));
-  const source = parsePlaybackSource(html, id);
-  if (!source.url) throw new Error('套路SM 当前页面未提供可播放的影片，可能需要登录及观看权限');
-  return resourceGroupsFor(ctx, id, stringValue(ctx.title) || '在线播放', source);
+  return resourceGroupsFor(ctx, id, stringValue(ctx && ctx.title) || '在线播放');
 }
 
-async function resolvePlayback(ctx) {
-  ctx = normalizeRuntimeContext(ctx);
+function resolvePlayback(ctx) {
   const id = itemIdFromContext(ctx);
-  if (!id) throw new Error('套路SM 播放参数无效');
-  const html = await fetchText(ctx, baseURL(ctx) + '/v/' + encodeURIComponent(id));
-  const source = parsePlaybackSource(html, id);
-  if (!source.url) throw new Error('套路SM 当前页面未提供媒体地址；完整影片需站点登录及观看权限');
-  if (source.preview && (/^download-/.test(stringValue(ctx.versionId)) || /\/download\//.test(stringValue(ctx.url)))) {
-    throw new Error('旧下载线路需要站点登录及观看权限；当前公开页面仅提供预览，请重新打开详情并选择“公开预览”');
-  }
-  const hls = /\.m3u8(?:$|[?#])/i.test(source.url);
-  if (hls) {
-    const body = await fetchText(ctx, source.url);
-    if (!/^\s*#EXTM3U/i.test(body)) throw new Error('套路SM 当前播放线路没有返回有效 HLS');
-  }
-  return { url: source.url, container: hls ? 'm3u8' : 'mp4', headers: mediaHeaders(ctx), startPositionSeconds: 0, isLive: false, streamKind: hls ? 'hls' : 'file' };
-}
+  const url = stringValue(ctx && ctx.url) || (id ? downloadURL(ctx, id) : '');
+  if (!url) throw new Error('套路SM 播放参数无效');
 
-function parsePlaybackSource(html, id) {
-  const scripts = String(html || '').match(/<script\b[^>]*>[\s\S]*?<\/script>/gi) || [];
-  for (const script of scripts) {
-    const owner = firstMatch(script, /const\s+video_id\s*=\s*['"]([^'"]+)['"]/);
-    if (owner !== String(id)) continue;
-    const url = decodeEntities(firstMatch(script, /const\s+source\s*=\s*['"]([^'"]+)['"]/));
-    if (!/^https?:\/\//i.test(url) || !/\.(?:mp4|m3u8)(?:$|[?#])/i.test(url)) continue;
-    return { url: url, preview: /\/preview_mp4\//i.test(url) || /正在播放预览/.test(html) };
-  }
-  return { url: '', preview: false };
+  return {
+    url: url,
+    container: 'mp4',
+    headers: mediaHeaders(ctx),
+    isLive: false,
+    streamKind: 'file'
+  };
 }
 
 async function search(ctx) {
-  ctx = normalizeRuntimeContext(ctx);
   const query = cleanText(contextValue(ctx, 'query') || contextValue(ctx, 'keyword') || contextValue(ctx, 'text'));
   const page = positiveInt(contextValue(ctx, 'page'), 1);
   if (!query) {
@@ -320,15 +294,25 @@ function parseListHtml(ctx, html) {
   return items;
 }
 
-function resourceGroupsFor(ctx, id, title, source) {
-  if (!source || !source.url) return [];
-  const versionId = (source.preview ? 'preview-' : 'source-') + id;
-  return [{ id: source.preview ? 'preview' : 'online', title: source.preview ? '公开预览' : '网页播放线路', versions: [{
-    id: versionId, name: source.preview ? '公开预览（非完整影片）' : '当前网页线路', title: title,
-    subtitle: source.preview ? '完整影片需要站点登录及观看权限' : '播放时重新读取网页地址',
-    container: /\.m3u8(?:$|[?#])/i.test(source.url) ? 'm3u8' : 'mp4', default: true,
-    action: { type: 'play', itemId: id, versionId: versionId, title: title }
-  }] }];
+function resourceGroupsFor(ctx, id, title) {
+  return [
+    {
+      id: 'download',
+      title: '在线播放',
+      versions: [
+        {
+          id: 'download-' + id,
+          name: '默认线路',
+          title: title || '默认线路',
+          subtitle: '站点下载直链',
+          url: downloadURL(ctx, id),
+          container: 'mp4',
+          default: true,
+          headers: mediaHeaders(ctx)
+        }
+      ]
+    }
+  ];
 }
 
 function categoryCard(ctx, section) {
@@ -390,28 +374,12 @@ function toWideItem(item) {
 }
 
 async function fetchText(ctx, url) {
-  let timer;
-  try {
-    return await Promise.race([Promise.resolve().then(async function () {
-      const options = { headers: mediaHeaders(ctx), timeout: 8, timeoutSeconds: 8, browserFallback: false };
-      let response;
-      if (typeof Widget !== 'undefined' && Widget.http && typeof Widget.http.get === 'function') response = await Widget.http.get(url, options);
-      else if (typeof Widget !== 'undefined' && Widget.http && typeof Widget.http.request === 'function') response = await Widget.http.request(Object.assign({ url: url, method: 'GET' }, options));
-      else if (typeof $http !== 'undefined' && typeof $http.get === 'function') response = await $http.get(url, options);
-      else throw new Error('当前环境没有 HTTP 客户端');
-      const status = Number(response && (response.statusCode || response.status) || 200);
-      if (status >= 400) throw new Error('套路SM HTTP ' + status);
-      const final = response && (response.finalURL || response.urlEffective || response.responseURL || response.url);
-      if (/\/login(?:[/?#]|$)/i.test(String(final || ''))) throw new Error('套路SM 此入口需要站点登录及观看权限');
-      let text = '';
-      if (typeof response === 'string') text = response;
-      else if (response && typeof response.text === 'function') text = await response.text();
-      else if (response) for (const value of [response.data, response.body, response.html, response.text]) { if (typeof value === 'string') { text = value; break; } if (value && typeof value.html === 'string') { text = value.html; break; } }
-      if (!text) throw new Error('套路SM 返回空内容');
-      if (/Just a moment|Checking (?:your )?browser|cf-chl-/i.test(text)) throw new Error('套路SM 返回验证页');
-      return String(text);
-    }), new Promise(function (_, reject) { timer = setTimeout(function () { reject(new Error('套路SM HTTP 等待超时（8 秒）')); }, 8000); })]);
-  } finally { clearTimeout(timer); }
+  const response = await Widget.http.get(url, {
+    headers: mediaHeaders(ctx)
+  });
+  const data = response && (response.data || response.body || response.text);
+  if (!data) throw new Error('请求失败: ' + url);
+  return String(data);
 }
 
 function mediaHeaders(ctx) {
@@ -456,13 +424,7 @@ function normalizePageId(id) {
 }
 
 function itemIdFromContext(ctx) {
-  for (const value of [ctx.itemId, ctx.id, ctx.link, ctx.vid, ctx.videoId, ctx.versionId, ctx.url]) {
-    const text = stringValue(value);
-    if (/^\d+$/.test(text)) return text;
-    const match = text.match(/^(?:download|preview|source)-(\d+)$/) || text.match(/\/(?:v|download)\/(\d+)(?:[/?#]|$)/);
-    if (match) return match[1];
-  }
-  return '';
+  return stringValue(ctx && (ctx.itemId || ctx.id || ctx.link || ctx.vid || ctx.videoId)).replace(/\D+/g, '');
 }
 
 function hasNextPage(html, page) {
@@ -561,17 +523,4 @@ function stringValue(value) {
 
 function escapeRegExp(text) {
   return stringValue(text).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-function normalizeRuntimeContext(input) {
-  let ctx = input;
-  if (typeof ctx === 'string') { try { ctx = JSON.parse(ctx); } catch (_) { ctx = {}; } }
-  if (!ctx || typeof ctx !== 'object' || Array.isArray(ctx)) return {};
-  const nested = {};
-  ['params', 'config', 'settings', 'parameters', 'pagination', 'pageInfo'].forEach(function (key) {
-    let bag = ctx[key];
-    if (typeof bag === 'string') { try { bag = JSON.parse(bag); } catch (_) { bag = null; } }
-    if (bag && typeof bag === 'object' && !Array.isArray(bag)) Object.keys(bag).forEach(function (name) { if (nested[name] === undefined) nested[name] = bag[name]; });
-  });
-  return Object.assign(nested, ctx);
 }

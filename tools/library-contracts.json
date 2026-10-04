@@ -278,12 +278,7 @@
     "id": "missav-mini-library",
     "parameters": [
       "baseURL",
-      "entryPath",
-      "backupBaseURLs",
-      "enableBrowserFallback",
-      "browserVisible",
-      "requestTimeoutSeconds",
-      "cacheMinutes"
+      "entryPath"
     ],
     "entryPoints": [
       "getManifest",
@@ -301,15 +296,7 @@
     "id": "missav-mini-library",
     "parameters": [
       "baseURL",
-      "entryPath",
-      "backupBaseURLs",
-      "enableBrowserFallback",
-      "browserVisible",
-      "automaticBrowserFallback",
-      "verificationCooldownMinutes",
-      "requestTimeoutSeconds",
-      "cacheMinutes",
-      "categoryRestoreMinutes"
+      "entryPath"
     ],
     "entryPoints": [
       "getManifest",
@@ -327,15 +314,7 @@
     "id": "missav-mini-library",
     "parameters": [
       "baseURL",
-      "entryPath",
-      "backupBaseURLs",
-      "enableBrowserFallback",
-      "browserVisible",
-      "automaticBrowserFallback",
-      "verificationCooldownMinutes",
-      "requestTimeoutSeconds",
-      "cacheMinutes",
-      "categoryRestoreMinutes"
+      "entryPath"
     ],
     "entryPoints": [
       "getManifest",
