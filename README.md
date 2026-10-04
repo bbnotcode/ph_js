@@ -4,13 +4,13 @@
 
 已经导入 DreamBy 的入口继续使用原来的下载地址和媒体库 ID。每个下载入口都包含完整 JavaScript，不需要远程加载器。
 
-## ASMRLIB 1.2.3 播放捕获测试版 — 2026-10-04
+## ASMRLIB 1.2.4 隐藏探测超时修复测试版 — 2026-10-04
 
 旧解析器独立隐藏打开 BI/AB 播放器，并遗漏宿主返回的 `capturedRequests`。当前三部真实样本均只有 BI/AB；BI 显示真人验证按钮，AB 公开代码在独立页面打开时跳走。1.2.3 保留原影片详情页和 iframe，提供“验证后捕获播放源”入口，兼容旧影片/线路标识。首页、分类、搜索与详情解析相关 23 个函数保持原样。
 
-最多一次短隐藏探测和一次可见媒体捕获；必要时由用户在页面手动点击播放。支持有界嵌套/JSON 返回值与捕获媒体的实际请求头，只有最终媒体地址才交给原生播放器。blob-only、验证要求、iframe 无媒体、宿主异常与超时分别报告；失败不缓存，总脚本截止时间 28 秒。脚本不能强制取消仍在运行的宿主浏览器。
+用户设备反馈 1.2.3 在 `stage=hidden-capture` 超时，尚未进入可见验证。1.2.4 默认直接打开原影片验证页，只进行一次可见媒体捕获；必要时由用户手动点击播放，不再先做隐藏探测。请保持“允许显示播放验证页”开启；明确关闭时仍只尝试一次短隐藏捕获。支持有界嵌套/JSON 返回值与捕获媒体的实际请求头，只有最终媒体地址才交给原生播放器。blob-only、验证要求、iframe 无媒体、宿主异常与超时分别报告；失败不缓存，可见捕获最多 18 秒，总脚本截止时间 28 秒。脚本不能强制取消仍在运行的宿主浏览器。
 
-[导入 1.2.3 测试版](https://raw.githubusercontent.com/bbnotcode/ph_js/codex/asmrlib-1.2.3-test-20261004/asmrlib-mini-library.js)。语法、模拟宿主和三部真实详情入口已验证；DreamBy 设备浏览器媒体回传和 iPhone 原生起播待用户测试。此次保留库 ID `asmrlib`，其他媒体库文件不变。测试分支基于已通过完整检查的主分支提交 `1e59aaaaa68431db6467a689bcb485dfb49ceb1e`；最新主分支的 JAVGG 1.0.6 存在七项与此次 ASMRLIB 无关的既有测试失败，未在本任务内修改。
+[导入 1.2.4 测试版（沿用原测试链接）](https://raw.githubusercontent.com/bbnotcode/ph_js/codex/asmrlib-1.2.3-test-20261004/asmrlib-mini-library.js)。语法、模拟宿主和三部真实详情入口已验证；DreamBy 设备浏览器媒体回传和 iPhone 原生起播待用户测试。此次保留库 ID `asmrlib`，其他媒体库文件不变。测试分支基于已通过完整检查的主分支提交 `1e59aaaaa68431db6467a689bcb485dfb49ceb1e`；最新主分支的 JAVGG 1.0.6 存在七项与此次 ASMRLIB 无关的既有测试失败，未在本任务内修改。
 
 ## JAVGG 1.0.4：使用用户正常显示的版本修复播放 — 2026-10-04
 
@@ -42,7 +42,7 @@
 | [MissAV CloudFlare 版](missav-mini-library-CloudFlare.js) | 1.0.7 |
 | [MissAV download-working](missav-mini-library-download-working.js) / [working 6](missav-mini-library-download-working%206.js) | 1.5.9 |
 | [SexBJCam](sexbjcam-mini-library.js) | 1.1.7 |
-| [ASMRLIB](asmrlib-mini-library.js) | 1.2.3（播放捕获测试版） |
+| [ASMRLIB](asmrlib-mini-library.js) | 1.2.4（播放捕获测试版） |
 | [JAVGG](javgg-mini-library.js) | 1.0.4（基于用户正常显示的 1.0.0 修复播放） |
 | [麻豆亚洲版](madou8-mini-library%205.js) | 1.1.0 |
 | [套路 SM](taolusm-mini-library.js) | 1.0.0 |

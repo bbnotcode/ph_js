@@ -291,8 +291,8 @@ test('ASMRLIB current embedded players share the original page and retain old li
   assert.equal(c.asmrVersionPlayerURL(versions[0].action), 'https://asmrlib.com/posts/' + post);
   assert.equal(versions[0].default, true);
   assert.equal(c.asmrVersionPlayerURL({versionId: 'asmrlib-line://BI/' + encodeURIComponent('https://bysetayico.com/e/sample')}), 'https://bysetayico.com/e/sample');
-  assert.equal(c.getManifest().version, '1.2.3');
-  assert.equal(restoration.supersededFiles['asmrlib-mini-library.js'].replacementVersion, '1.2.3');
+  assert.equal(c.getManifest().version, '1.2.4');
+  assert.equal(restoration.supersededFiles['asmrlib-mini-library.js'].replacementVersion, '1.2.4');
 });
 
 test('ASMRLIB reads capturedRequests and preserves the actual media request headers', async () => {
@@ -303,7 +303,8 @@ test('ASMRLIB reads capturedRequests and preserves the actual media request head
   const result = await c.resolvePlayback(JSON.stringify({itemId: 'asmrlib://post/' + post, versionId: 'asmrlib-line://AB/' + encodeURIComponent('https://abyssplayer.com/sample')}));
   assert.equal(result.url, 'https://cdn.test/master.m3u8'); assert.equal(result.headers.Referer, 'https://abyssplayer.com/');
   assert.equal(result.headers['User-Agent'], 'DeviceUA'); assert.equal(result.headers.Origin, undefined);
-  assert.equal(calls.length, 1); assert.equal(calls[0].url, 'https://asmrlib.com/posts/' + post); assert.equal(calls[0].options.waitForMediaSource, undefined);
+  assert.equal(calls.length, 1); assert.equal(calls[0].url, 'https://asmrlib.com/posts/' + post);
+  assert.equal(calls[0].options.visible, true); assert.equal(calls[0].options.waitForMediaSource, true);
 });
 test('ASMRLIB nested JSON capture supports page-version-only playback', async () => {
   const c = load('asmrlib-mini-library.js'); const post = 'becd2651e7d56ca656d27766d036dcee';
@@ -311,21 +312,22 @@ test('ASMRLIB nested JSON capture supports page-version-only playback', async ()
   const result = await c.resolvePlayback({versionId:'asmrlib-page://post/' + post});
   assert.equal(result.url,'https://cdn.test/current.mp4'); assert.deepEqual(plain(result.headers),{});
 });
-test('ASMRLIB uses at most one visible capture after a loaded hidden page', async () => {
-  const c = load('asmrlib-mini-library.js'); const calls = [];
-  c.Widget.browser = {async fetch(url,options){calls.push(options);return options.visible ? {mediaSources:['https://cdn.test/current.mp4']} : {html:'点击播放按钮以验证你是真人'};}};
-  await c.resolvePlayback({itemId:'asmrlib://post/becd2651e7d56ca656d27766d036dcee'});
-  assert.equal(calls.length,2); assert.equal(calls[0].visible,false); assert.equal(calls[1].visible,true); assert.equal(calls[1].waitForMediaSource,true);
+test('ASMRLIB opens one visible capture directly even when hidden loading would hang', async () => {
+  const c = load('asmrlib-mini-library.js',{setTimeout:fn=>setTimeout(fn,10)}); const calls = [];
+  c.Widget.browser = {fetch(url,options){calls.push(options);return options.visible ? Promise.resolve({mediaSources:['https://cdn.test/current.mp4']}) : new Promise(()=>{});}};
+  const result = await c.resolvePlayback({itemId:'asmrlib://post/becd2651e7d56ca656d27766d036dcee'});
+  assert.equal(result.url,'https://cdn.test/current.mp4');
+  assert.equal(calls.length,1); assert.equal(calls[0].visible,true); assert.equal(calls[0].waitForMediaSource,true);
 });
 test('ASMRLIB rejects blobs and does not scrape ad media from arbitrary HTML', async () => {
   const c=load('asmrlib-mini-library.js'); let calls=0;
   c.Widget.browser={async fetch(){calls++;return {mediaSources:['blob:https://player.test/123'],html:'<script>var ad="https://cdn.test/advert.mp4"</script>'};}};
-  await assert.rejects(c.resolvePlayback({itemId:'asmrlib://post/becd2651e7d56ca656d27766d036dcee'}),/stage=blob-only/); assert.equal(calls,2);
+  await assert.rejects(c.resolvePlayback({itemId:'asmrlib://post/becd2651e7d56ca656d27766d036dcee'}),/stage=blob-only/); assert.equal(calls,1);
 });
 test('ASMRLIB hanging host is bounded and never starts an overlapping fallback', async () => {
   const c=load('asmrlib-mini-library.js',{setTimeout:fn=>setTimeout(fn,10)});let calls=0;
   c.Widget.browser={fetch(){calls++;return new Promise(()=>{});}};
-  await assert.rejects(c.resolvePlayback({itemId:'asmrlib://post/becd2651e7d56ca656d27766d036dcee'}),/stage=hidden-capture/);assert.equal(calls,1);
+  await assert.rejects(c.resolvePlayback({itemId:'asmrlib://post/becd2651e7d56ca656d27766d036dcee'}),/stage=visible-capture/);assert.equal(calls,1);
 });
 test('ASMRLIB hidden preference fails explicitly and a later attempt can succeed', async () => {
   const c=load('asmrlib-mini-library.js');let available=false;const calls=[];

@@ -2,7 +2,7 @@
  * ASMRLIB - Dreamby / baiPlay 自定义媒体库
  * Source: https://asmrlib.com/
  * @author Alan huang
- * @version 1.2.3
+ * @version 1.2.4
  */
 
 const ASMRLIB_BASE = 'https://asmrlib.com';
@@ -192,7 +192,7 @@ function getManifest() {
     id: 'asmrlib',
     name: 'ASMRLIB',
     title: 'ASMRLIB',
-    version: '1.2.3',
+    version: '1.2.4',
     author: 'Alan huang',
     logo: ASMRLIB_LOGO,
     icon: ASMRLIB_LOGO,
@@ -490,7 +490,9 @@ async function resolvePlayback(input) {
   // Both current providers need the original iframe. Cached BI/AB IDs remain usable.
   const pageURL = itemId ? ASMRLIB_BASE + '/posts/' + itemId : playerUrl;
   const allowVisible = !/^(?:false|0|no|off)$/i.test(String(asmrPick(input, ['browserVisible'], true)));
-  const attempts = allowVisible ? [false, true] : [false];
+  // These players need a real user gesture. A hidden load may hang before
+  // verification opens, so use exactly one visible capture by default.
+  const attempts = [allowVisible];
   let diagnosis = 'no-media';
   let keys = '';
   for (let i = 0; i < attempts.length; i += 1) {
@@ -503,7 +505,7 @@ async function resolvePlayback(input) {
           visible: attempts[i], timeout: seconds, waitAfterLoad: 1,
           headers: asmrHeaders(ASMRLIB_BASE + '/')
         };
-        // Hidden probes return after load; don't wait there for an impossible human gesture.
+        // Explicit hidden opt-out does not wait for an impossible human gesture.
         if (attempts[i]) options.waitForMediaSource = true;
         return Widget.browser.fetch(pageURL, options);
       });
