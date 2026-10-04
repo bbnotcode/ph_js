@@ -9,7 +9,7 @@ const WidgetMetadata = {
   id: 'javgg-mini-library',
   name: 'JAVGG',
   title: 'JAVGG',
-  version: '1.0.5',
+  version: '1.0.6',
   requiredVersion: '0.0.1',
   author: 'Alan huang',
   site: JAVGG_DEFAULT_BASE,
@@ -57,6 +57,10 @@ function getManifest() {
       defaultValue: JAVGG_DEFAULT_BASE,
       required: true,
       description: 'JAVGG 当前可访问域名，末尾斜杠可省略。'
+    }, {
+      name: 'manualQuality', title: '手动画质选择', type: 'boolean',
+      value: false, defaultValue: false,
+      description: '默认先显示服务器，播放时选择最高可用画质。开启后需预先请求各线路清单，慢网络下可能失败。'
     }]
   };
 }
@@ -171,6 +175,7 @@ async function getDetail(rawCtx) {
     descriptionBlock(html)
   ));
   const players = parsePlayers(html);
+  const lineGroups = manualQualityEnabled(ctx) ? [] : serverGroups(detailUrl, title, players);
   const dateText = firstNonEmpty(
     firstMatch(html, /<span\b[^>]*class=["'][^"']*\bdate\b[^"']*["'][^>]*>([\s\S]*?)<\/span>/i),
     firstMatch(html, /(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\.?\s+\d{1,2},\s+\d{4}/i)
@@ -184,7 +189,7 @@ async function getDetail(rawCtx) {
   }).slice(0, 18);
   return {
     pageType: 'detail',
-    id: encodePayload({ kind: 'detail', detailUrl: detailUrl, title: title }),
+    id: encodePayload({ kind: 'detail', detailUrl: detailUrl, title: title, players: players }),
     title: title || titleFromURL(detailUrl),
     originalTitle: extractCode(title),
     type: 'movie',
@@ -205,20 +210,46 @@ async function getDetail(rawCtx) {
         action: { type: 'category', pageId: encodeDynamicPageId(actor.url, actor.title), title: actor.title, itemAspectRatio: '2:3' }
       };
     }),
-    // 画质清单需要访问外部播放器并可能短时变化，交给 getResourceVersions 动态发现，
-    // 避免把一次失败或过期的媒体 URL 缓存在详情页。
-    resourceGroups: [],
+    // These are actual server choices, not guessed or failed quality metadata.
+    // Manual quality mode still discovers real heights dynamically.
+    resourceGroups: lineGroups,
     resourceSummary: {
-      versionCount: 0,
+      versionCount: lineGroups.length,
       episodeCount: 0,
-      defaultVersionId: ''
+      defaultVersionId: lineGroups[0] ? lineGroups[0].versions[0].id : ''
     },
     recommendations: related.length ? [{ id: 'related', title: '相关推荐', style: 'discover.posterCompact', items: related }] : []
   };
 }
 
 async function getResourceVersions(rawCtx) {
+  if (!manualQualityEnabled(normalizeContext(rawCtx))) {
+    return withPlaybackBudget(rawCtx, getServerVersions, '线路加载');
+  }
   return withPlaybackBudget(rawCtx, discoverResourceVersions, '画质发现');
+}
+
+function manualQualityEnabled(ctx) {
+  const value = contextValue(ctx, 'manualQuality');
+  return value === true || value === 'true' || value === 1 || value === '1';
+}
+
+function serverGroups(detailUrl, title, players) {
+  return players.map(function (player) {
+    const group = qualityGroup(detailUrl, title, player, [{ name: '自动画质', height: 0 }]);
+    group.versions[0].subtitle = '播放时解析最高可用画质';
+    return group;
+  });
+}
+
+async function getServerVersions(ctx) {
+  const payload = decodePayload(firstNonEmpty(ctx.versionId, ctx.itemId, ctx.id));
+  const detailUrl = firstNonEmpty(payload.detailUrl, detailURLFromContext(ctx));
+  if (!detailUrl) throw stageError('detail-parameter', '缺少影片详情地址');
+  let players = Array.isArray(payload.players) ? payload.players : [];
+  if (!players.length) players = parsePlayers(await fetchPlaybackText(ctx, detailUrl, detailUrl, null, 4, 'detail-http'));
+  if (!players.length) throw stageError('detail-players', '详情页没有播放服务器');
+  return serverGroups(detailUrl, firstNonEmpty(ctx.title, payload.title), players);
 }
 
 async function resolvePlayback(input) {
@@ -846,6 +877,13 @@ async function resolvePlaybackWithinBudget(rawCtx) {
       playerUrl = selected[0].url;
       line = selected[0].line;
     }
+    if (!playerUrl && !manualQualityEnabled(ctx) && players.length) {
+      const preferred = players.filter(function (player) {
+        return normalizePlayerLine(player.line) === 'streamwish';
+      })[0] || players[0];
+      playerUrl = preferred.url;
+      line = preferred.line;
+    }
     const attempts = playerUrl ? [] : await inspectPlayerQualities(ctx, detailUrl, players);
     const usable = attempts.filter(function (attempt) { return attempt.qualities.length; });
     usable.sort(function (a, b) {
@@ -854,7 +892,7 @@ async function resolvePlaybackWithinBudget(rawCtx) {
       return Number(bExact) - Number(aExact) || (b.qualities[0].height || 0) - (a.qualities[0].height || 0);
     });
     const chosen = usable[0];
-    const player = chosen ? chosen.player : (selected[0] || players[0]);
+    const player = chosen ? chosen.player : (selected[0] || players.filter(function (item) { return item.url === playerUrl; })[0] || players[0]);
     playerUrl = player && player.url;
     line = player && player.line;
     media = chosen && chosen.media;
