@@ -14,10 +14,6 @@
       "version": "1.2.0",
       "sha256": "2cb404dbbab67626d762248dbe050ab7e534ea68278ff745c5d304b6a487faa0"
     },
-    "javgg-mini-library.js": {
-      "version": "1.0.0",
-      "sha256": "39092a7afb7107182c33fc923d93cb99c20ea3fb97d01810ef1f4e974de8885e"
-    },
     "madou8-mini-library 5.js": {
       "version": "1.1.0",
       "sha256": "7ea8fc7aec7352e470fc0019f509723dce4e8c5f1a1f05d4ab692bca8f3bb488"
@@ -41,6 +37,14 @@
     "missav-mini-library-download-working 6.js": {
       "version": "1.5.9",
       "sha256": "20f5cc483a756e52a7eab4d306a978c8b1d1bf04c75a3d3584c68a1915d15ce6"
+    }
+  },
+  "supersededFiles": {
+    "javgg-mini-library.js": {
+      "version": "1.0.0",
+      "sha256": "39092a7afb7107182c33fc923d93cb99c20ea3fb97d01810ef1f4e974de8885e",
+      "replacementVersion": "1.0.3",
+      "reason": "User requested home and category loading repair on 2026-10-04"
     }
   }
 }
