@@ -9,8 +9,8 @@ const WidgetMetadata = {
   id: 'kbjfan-mini-library',
   name: 'KBJFan',
   title: 'KBJFan',
-  version: '1.0.2',
-  author: 'Alan huang',
+  version: '1.0.0',
+  author: 'EL',
   logo: KBJFAN_LOGO,
   icon: KBJFAN_LOGO,
   site: KBJFAN_DEFAULT_BASE,
@@ -60,8 +60,12 @@ function getManifest() {
 }
 
 async function getHome(ctx) {
-  ctx = normalizeRuntimeContext(ctx);
-  const hero = (await loadSectionItems(ctx, KBJFAN_SECTIONS[0], 1)).slice(0, 8);
+  let hero = [];
+  try {
+    hero = (await loadSectionItems(ctx, KBJFAN_SECTIONS[0], 1)).slice(0, 8);
+  } catch (_) {
+    hero = [];
+  }
   return {
     pageType: 'home',
     id: 'kbjfan-home',
@@ -83,7 +87,6 @@ async function getHome(ctx) {
 }
 
 async function getHomeSection(ctx) {
-  ctx = normalizeRuntimeContext(ctx);
   const section = findSection(ctx && (ctx.sectionId || ctx.id)) || KBJFAN_SECTIONS[0];
   try {
     return {
@@ -107,12 +110,9 @@ async function getHomeSection(ctx) {
 }
 
 async function getCategory(ctx) {
-  ctx = normalizeRuntimeContext(ctx);
   const section = findSection(ctx && (ctx.pageId || ctx.id || ctx.category || ctx.genreId)) || KBJFAN_SECTIONS[0];
   const page = positiveInt(contextValue(ctx, 'page'), 1);
   const html = await fetchText(ctx, categoryURL(ctx, section, page));
-  const items = parseListHtml(ctx, html);
-  if (!items.length && page === 1) throw new Error('KBJFan 当前页面没有原站影片，请确认可用站点地址');
   return {
     pageType: 'category',
     id: section.id,
@@ -121,12 +121,11 @@ async function getCategory(ctx) {
     itemAspectRatio: '16:9',
     page: page,
     hasMore: hasNextPage(html, page),
-    items: items
+    items: parseListHtml(ctx, html)
   };
 }
 
 async function getDetail(ctx) {
-  ctx = normalizeRuntimeContext(ctx);
   const detailURL = detailURLFromContext(ctx);
   if (!detailURL) throw new Error('KBJFan 详情参数无效');
   const html = await fetchText(ctx, detailURL);
@@ -150,7 +149,6 @@ async function getDetail(ctx) {
 }
 
 async function getResourceVersions(ctx) {
-  ctx = normalizeRuntimeContext(ctx);
   const detailURL = detailURLFromContext(ctx);
   if (!detailURL) return [];
   let videoURL = directMediaURLFromContext(ctx);
@@ -161,12 +159,10 @@ async function getResourceVersions(ctx) {
     videoURL = detail.videoURL;
     title = detail.title || title;
   }
-  if (!videoURL) throw new Error('KBJFan 当前详情没有可播放媒体，可能是站点已迁移或内容不可用');
   return resourceGroupsFor(ctx, detailURL, title, videoURL);
 }
 
 async function resolvePlayback(ctx) {
-  ctx = normalizeRuntimeContext(ctx);
   let detailURL = detailURLFromContext(ctx);
   let videoURL = directMediaURLFromContext(ctx);
   if (!videoURL && detailURL) {
@@ -186,7 +182,6 @@ async function resolvePlayback(ctx) {
 }
 
 async function search(ctx) {
-  ctx = normalizeRuntimeContext(ctx);
   const query = cleanText(contextValue(ctx, 'query') || contextValue(ctx, 'keyword') || contextValue(ctx, 'text'));
   const page = positiveInt(contextValue(ctx, 'page'), 1);
   if (!query) return { pageType: 'search', title: '搜索结果', keyword: '', page: page, hasMore: false, items: [] };
@@ -267,7 +262,6 @@ function parseDetailHtml(ctx, html, detailURL) {
 }
 
 function resourceGroupsFor(ctx, detailURL, title, videoURL) {
-  if (!videoURL) return [];
   return [{
     id: 'online',
     title: '在线播放',
@@ -286,49 +280,14 @@ function resourceGroupsFor(ctx, detailURL, title, videoURL) {
 }
 
 async function loadSectionItems(ctx, section, page) {
-  const items = parseListHtml(ctx, await fetchText(ctx, categoryURL(ctx, section, page)));
-  if (!items.length && page === 1) throw new Error('KBJFan 当前页面没有原站影片；请确认站点地址是否仍提供 KBJFan 内容。');
-  return items;
+  return parseListHtml(ctx, await fetchText(ctx, categoryURL(ctx, section, page)));
 }
 
 async function fetchText(ctx, url) {
-  try {
-    const response = await kbjDeadline(async function () {
-      const options = { headers: requestHeaders(ctx, url), timeout: 8, timeoutSeconds: 8, browserFallback: false };
-      let response;
-      if (typeof Widget !== 'undefined' && Widget.http && typeof Widget.http.get === 'function') response = await Widget.http.get(url, options);
-      else if (typeof Widget !== 'undefined' && Widget.http && typeof Widget.http.request === 'function') response = await Widget.http.request(Object.assign({ url: url, method: 'GET' }, options));
-      else if (typeof $http !== 'undefined' && typeof $http.get === 'function') response = await $http.get(url, options);
-      else throw new Error('当前环境没有 HTTP 客户端');
-      const final = response && (response.finalURL || response.urlEffective || response.responseURL || response.url);
-      if (final && kbjHost(final) && kbjHost(final) !== kbjHost(baseURL(ctx))) throw new Error('原域名已跳转到其他站点，请更新为已确认的 KBJFan 地址');
-      const status = Number(response && (response.statusCode || response.status) || 200);
-      if (status >= 400) throw new Error('站点返回 HTTP ' + status);
-      const text = await kbjResponseText(response);
-      if (!text) throw new Error('站点返回空内容');
-      if (/Just a moment|Checking (?:your )?browser|cf-chl-|cf-mitigated|Cloudflare Ray ID/i.test(text)) throw new Error('站点返回验证页，未收到影片内容');
-      return text;
-    }, 8000);
-    return response;
-  } catch (error) {
-    throw new Error('KBJFan 加载失败：' + stringValue(error && error.message || error) + '。原下载路径仍保留；无法连接或站点已迁移时需确认可用站点地址。');
-  }
-}
-function kbjHost(url) { const match = String(url || '').match(/^https?:\/\/([^/?#]+)/i); return match ? match[1].toLowerCase().replace(/^www\./, '') : ''; }
-async function kbjResponseText(response) {
-  if (typeof response === 'string') return response;
-  if (!response) return '';
-  if (typeof response.text === 'function') return String(await response.text());
-  for (const value of [response.data, response.body, response.html, response.text]) {
-    if (typeof value === 'string') return value;
-    if (value && typeof value.html === 'string') return value.html;
-  }
-  return '';
-}
-async function kbjDeadline(work, milliseconds) {
-  let timer;
-  try { return await Promise.race([Promise.resolve().then(work), new Promise(function (_, reject) { timer = setTimeout(function () { reject(new Error('HTTP 等待超时（8 秒）')); }, milliseconds); })]); }
-  finally { clearTimeout(timer); }
+  const response = await Widget.http.get(url, { headers: requestHeaders(ctx, url) });
+  const data = response && (response.data || response.body || response.text);
+  if (!data) throw new Error('请求失败: ' + url);
+  return String(data);
 }
 
 function requestHeaders(ctx, referer) {
@@ -424,16 +383,3 @@ function escapeRegExp(value) { return stringValue(value).replace(/[.*+?^${}()|[\
 const KBJFAN_API = { getManifest, getHome, getHomeSection, getCategory, getDetail, getResourceVersions, resolvePlayback, search, onSearch, getSearch, play, getPlayback };
 if (typeof globalThis !== 'undefined') Object.keys(KBJFAN_API).forEach(function (key) { globalThis[key] = KBJFAN_API[key]; });
 if (typeof module !== 'undefined' && module.exports) module.exports = KBJFAN_API;
-
-function normalizeRuntimeContext(input) {
-  let ctx = input;
-  if (typeof ctx === 'string') { try { ctx = JSON.parse(ctx); } catch (_) { ctx = {}; } }
-  if (!ctx || typeof ctx !== 'object' || Array.isArray(ctx)) return {};
-  const nested = {};
-  ['params', 'config', 'settings', 'parameters', 'pagination', 'pageInfo'].forEach(function (key) {
-    let bag = ctx[key];
-    if (typeof bag === 'string') { try { bag = JSON.parse(bag); } catch (_) { bag = null; } }
-    if (bag && typeof bag === 'object' && !Array.isArray(bag)) Object.keys(bag).forEach(function (name) { if (nested[name] === undefined) nested[name] = bag[name]; });
-  });
-  return Object.assign(nested, ctx);
-}

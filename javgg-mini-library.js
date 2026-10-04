@@ -9,7 +9,7 @@ const WidgetMetadata = {
   id: 'javgg-mini-library',
   name: 'JAVGG',
   title: 'JAVGG',
-  version: '1.0.2',
+  version: '1.0.0',
   requiredVersion: '0.0.1',
   author: 'Alan huang',
   site: JAVGG_DEFAULT_BASE,
@@ -218,80 +218,54 @@ async function getDetail(rawCtx) {
 }
 
 async function getResourceVersions(rawCtx) {
-  return withPlaybackBudget(rawCtx, discoverResourceVersions, '画质发现');
-}
-
-async function discoverResourceVersions(rawCtx) {
   const ctx = normalizeContext(rawCtx);
   const directPayload = decodePayload(firstNonEmpty(ctx.versionId, ctx.itemId, ctx.id));
   const detailUrl = firstNonEmpty(directPayload.detailUrl, detailURLFromContext(ctx));
   if (!detailUrl) return [];
-  const html = await fetchText(ctx, detailUrl, detailUrl, null, 4, 'detail-http');
+  const html = await fetchText(ctx, detailUrl);
   const title = cleanText(firstNonEmpty(ctx.title, metaContent(html, 'property', 'og:title'), pageTitle(html)));
   const players = parsePlayers(html);
-  if (!players.length) throw stageError('detail-players', '源站详情页当前没有可用播放线路');
-  const attempts = await inspectPlayerQualities(ctx, detailUrl, players);
-  const groups = attempts.filter(function (attempt) { return attempt.qualities.length; })
-    .map(function (attempt) { return qualityGroup(detailUrl, title, attempt.player, attempt.qualities); });
-  if (groups.length) return groups;
-  // Browser execution is one fallback only when static discovery produced no usable line.
-  const candidate = attempts.filter(function (attempt) { return !attempt.media; })[0];
-  if (candidate && remainingPlaybackSeconds(ctx, 8) > 0.5) {
-    const captured = await extractFromBrowser(candidate.player.url, detailUrl, ctx, 8);
-    if (captured) {
-      const retry = await discoverQualities(ctx, detailUrl, candidate.player, false, captured);
-      if (retry.qualities.length) return [qualityGroup(detailUrl, title, retry.player, retry.qualities)];
-      candidate.stage = retry.stage;
-    }
+  if (!players.length) throw new Error('源站详情页当前没有可用播放线路');
+  const groups = [];
+  for (let index = 0; index < players.length; index += 1) {
+    const qualities = await discoverQualities(ctx, detailUrl, players[index]);
+    if (qualities.length) groups.push(qualityGroup(detailUrl, title, players[index], qualities));
   }
-  const diagnostic = attempts.map(function (attempt) { return attempt.player.line + ':' + attempt.stage; }).join(', ');
-  throw stageError('quality-discovery', '未发现可用画质；' + diagnostic + '；请稍后重试');
+  if (!groups.length) throw new Error('暂时无法发现可用画质，请稍后重试');
+  return groups;
 }
 
-async function resolvePlaybackWithinBudget(rawCtx) {
+async function resolvePlayback(rawCtx) {
   const ctx = normalizeContext(rawCtx);
   const payload = decodePayload(firstNonEmpty(ctx.versionId, ctx.itemId, ctx.id));
   let playerUrl = firstNonEmpty(ctx.playerUrl, payload.playerUrl);
   let detailUrl = firstNonEmpty(payload.detailUrl, detailURLFromContext(ctx));
   let line = firstNonEmpty(payload.line, ctx.line);
-  const requestedHeight = positiveInt(firstNonEmpty(payload.height, ctx.height), 0);
-  let media;
   if (!playerUrl && detailUrl) {
-    const players = parsePlayers(await fetchText(ctx, detailUrl, detailUrl, null, 4, 'detail-http'));
-    const selected = players.filter(function (item) { return payload.lineId ? item.lineId === payload.lineId : (line && item.line === line); });
-    const attempts = await inspectPlayerQualities(ctx, detailUrl, selected.length ? selected : players);
-    const usable = attempts.filter(function (attempt) { return attempt.qualities.length; });
-    usable.sort(function (a, b) {
-      const aExact = a.qualities.some(function (q) { return q.height === requestedHeight && requestedHeight > 0; });
-      const bExact = b.qualities.some(function (q) { return q.height === requestedHeight && requestedHeight > 0; });
-      return Number(bExact) - Number(aExact) || (b.qualities[0].height || 0) - (a.qualities[0].height || 0);
-    });
-    const chosen = usable[0];
-    const player = chosen ? chosen.player : (selected[0] || players[0]);
-    playerUrl = player && player.url;
-    line = player && player.line;
-    media = chosen && chosen.media;
+    const players = parsePlayers(await fetchText(ctx, detailUrl));
+    const selected = players.filter(function (item) { return !line || item.line === line; })[0] || players[0];
+    playerUrl = selected && selected.url;
+    line = selected && selected.line;
   }
-  if (!playerUrl) throw stageError('detail-players', '未找到 JAVGG 播放器地址');
-  if (!media) media = await resolvePlayerMedia(ctx, playerUrl, detailUrl, true);
-  if (!media.url) throw stageError(media.stage || 'player-media', '线路 ' + (line || '') + ' 暂时无法解析，请切换其他线路');
-  let playable = media.url;
-  if (/\.m3u8(?:$|[?#])/i.test(playable)) {
+  if (!playerUrl) throw new Error('未找到 JAVGG 播放器地址');
+
+  let playable = await resolvePlayerMedia(ctx, playerUrl, detailUrl);
+  if (!playable) throw new Error('线路 ' + (line || '') + ' 暂时无法解析，请切换其他线路');
+  const requestedHeight = positiveInt(firstNonEmpty(payload.height, ctx.height), 0);
+  if (requestedHeight && /\.m3u8(?:$|[?#])/i.test(playable)) {
     try {
-      const playlist = await fetchText(ctx, playable, playerUrl, media.headers, 4, 'manifest-http');
-      if (!/#EXTM3U/i.test(playlist)) throw stageError('manifest-not-hls', '来源未返回 HLS 清单');
+      const playlist = await fetchText(ctx, playable, playerUrl);
       const variants = parseMasterPlaylist(playable, playlist);
-      const selected = variants.filter(function (item) { return item.height === requestedHeight; })[0] || variants[0];
+      const selected = variants.filter(function (item) { return item.height === requestedHeight; })[0];
       if (selected) playable = selected.url;
     } catch (error) {
-      if (/-4\d\d$|verification$|not-hls$/.test(error.stage || '')) throw error;
-      // Preserve the fresh real master only when probing fails transiently.
+      // The master itself remains a valid highest/automatic fallback.
     }
   }
   return {
     url: playable,
     container: /\.m3u8(?:$|[?#])/i.test(playable) ? 'm3u8' : 'mp4',
-    headers: media.headers,
+    headers: playbackHeaders(playerUrl),
     startPositionSeconds: 0,
     isLive: false,
     streamKind: /\.m3u8(?:$|[?#])/i.test(playable) ? 'hls' : 'file'
@@ -376,56 +350,32 @@ function parseCards(ctx, html) {
 
 function parsePlayers(html) {
   const text = String(html || '');
-  const options = {};
-  const optionPattern = /<li\b([^>]*)>([\s\S]*?)<\/li>/gi;
-  let match;
-  while ((match = optionPattern.exec(text))) {
-    if (!/\bdooplay_player_option\b/i.test(attributeValue(match[1], 'class'))) continue;
-    const number = attributeValue(match[1], 'data-nume');
-    const server = firstMatch(match[2], /<span\b[^>]*class=["'][^"']*\bserver\b[^"']*["'][^>]*>([\s\S]*?)<\/span>/i);
-    const title = firstMatch(match[2], /<span\b[^>]*class=["'][^"']*\btitle\b[^"']*["'][^>]*>([\s\S]*?)<\/span>/i);
-    options[number] = cleanText(server || title) || ('线路 ' + number);
-  }
   const results = [];
-  // source-player-N matches data-nume=N, even if a frame is missing or reordered.
-  const sourcePattern = /<div\b([^>]*\bid=["']source-player-\d+["'][^>]*)>([\s\S]*?<iframe\b[^>]*>)/gi;
-  while ((match = sourcePattern.exec(text))) {
-    const id = attributeValue(match[1], 'id').match(/^source-player-(\d+)$/);
-    if (!id) continue;
-    const frame = firstMatch(match[2], /<iframe\b([^>]*)>/i);
-    const url = iframeURL(frame);
-    if (url) results.push({ lineId: id[1], line: options[id[1]] || ('线路 ' + id[1]), url: url });
+  const iframeURLs = [];
+  const iframePattern = /<iframe\b[^>]*(?:data-lazy-src|data-src|src)=["']([^"']+)["'][^>]*>/gi;
+  let match;
+  while ((match = iframePattern.exec(text))) {
+    const url = htmlDecode(match[1]);
+    if (/earnvidjav|javggvideo|streamhgjav|\/embed\/|\/e\/|\/t\//i.test(url)) iframeURLs.push(url);
   }
-  if (!results.length) {
-    const frames = text.match(/<iframe\b[^>]*>/gi) || [];
-    const numbers = Object.keys(options);
-    frames.forEach(function (frame) {
-      const url = iframeURL(frame);
-      if (!url) return;
-      const number = numbers[results.length] || String(results.length + 1);
-      results.push({ lineId: number, line: options[number] || ('线路 ' + number), url: url });
-    });
-  }
-  return uniqueBy(results, function (player) { return player.url; });
-}
-
-function attributeValue(tag, name) {
-  return htmlDecode(firstMatch(tag, new RegExp('\\b' + escapeRegExp(name) + '\\s*=\\s*["\']([^"\']*)', 'i')));
-}
-
-function iframeURL(tag) {
-  const url = firstNonEmpty(attributeValue(tag, 'data-lazy-src'), attributeValue(tag, 'data-src'), attributeValue(tag, 'src'));
-  return /^https?:\/\//i.test(url) && /earnvidjav|javggvideo|streamhgjav|\/embed\/|\/e\/|\/t\//i.test(url) ? url : '';
+  const optionPattern = /<li\b[^>]*class=["'][^"']*\bdooplay_player_option\b[^"']*["'][^>]*data-post=["']([^"']+)["'][^>]*data-nume=["']([^"']+)["'][^>]*>[\s\S]*?(?:<span[^>]*class=["'][^"']*\btitle\b[^"']*["'][^>]*>([\s\S]*?)<\/span>|Server[\s\S]*?([A-Z]{1,5}))[\s\S]*?<\/li>/gi;
+  const labels = [];
+  while ((match = optionPattern.exec(text))) labels.push(cleanText(match[3] || match[4]));
+  iframeURLs.forEach(function (url, index) {
+    const line = labels[index] || ['VH', 'TB', 'SW'][index] || ('线路 ' + (index + 1));
+    results.push({ line: line, url: url });
+  });
+  return uniqueBy(results, function (x) { return x.url; });
 }
 
 function qualityGroup(detailUrl, title, player, qualities) {
   return {
-    id: 'line-' + (player.lineId || player.line),
+    id: 'line-' + player.line,
     title: player.line + ' 线路',
     versions: qualities.map(function (quality, index) {
       const payload = encodePayload({
         kind: 'play', detailUrl: detailUrl, playerUrl: player.url,
-        line: player.line, lineId: player.lineId, height: quality.height || 0, title: title
+        line: player.line, height: quality.height || 0, title: title
       });
       return {
         id: payload,
@@ -442,50 +392,34 @@ function qualityGroup(detailUrl, title, player, qualities) {
   };
 }
 
-async function inspectPlayerQualities(ctx, detailUrl, players) {
-  const attempts = new Array(players.length);
-  let next = 0;
-  async function worker() {
-    while (next < players.length) {
-      const index = next++;
-      attempts[index] = await discoverQualities(ctx, detailUrl, players[index], false);
+async function discoverQualities(ctx, detailUrl, player) {
+  const mediaURL = await resolvePlayerMedia(ctx, player.url, detailUrl);
+  if (!mediaURL) return [];
+  if (!/\.m3u8(?:$|[?#])/i.test(mediaURL)) return [{ name: 'MP4', height: 0 }];
+  try {
+    const playlist = await fetchText(ctx, mediaURL, player.url);
+    const variants = parseMasterPlaylist(mediaURL, playlist);
+    if (variants.length) {
+      return variants.map(function (variant) {
+        return { name: variant.height ? variant.height + 'p' : 'HLS', height: variant.height || 0 };
+      });
     }
+    if (/#EXTINF/i.test(playlist)) return [{ name: 'HLS 原始画质', height: 0 }];
+  } catch (error) {
+    return [];
   }
-  await Promise.all([worker(), worker()]);
-  return attempts;
+  return [];
 }
 
-async function discoverQualities(ctx, detailUrl, player, allowBrowser, captured) {
-  const media = captured || await resolvePlayerMedia(ctx, player.url, detailUrl, allowBrowser);
-  const result = { player: player, qualities: [], media: media.url ? media : null, stage: media.stage || 'player-media' };
-  if (!media.url) return result;
-  if (!/\.m3u8(?:$|[?#])/i.test(media.url)) {
-    result.qualities = [{ name: 'MP4', height: 0 }];
-    return result;
-  }
+async function resolvePlayerMedia(ctx, playerUrl, detailUrl) {
+  let playable = '';
   try {
-    const playlist = await fetchText(ctx, media.url, player.url, media.headers, 4, 'manifest-http');
-    const variants = parseMasterPlaylist(media.url, playlist);
-    if (variants.length) result.qualities = variants.map(function (variant) {
-      return { name: variant.height ? variant.height + 'p' : 'HLS', height: variant.height || 0 };
-    });
-    else if (/#EXTINF/i.test(playlist)) result.qualities = [{ name: 'HLS 原始画质', height: 0 }];
-    else result.stage = 'manifest-not-hls';
-  } catch (error) { result.stage = error.stage || 'manifest-http'; }
-  return result;
-}
-
-async function resolvePlayerMedia(ctx, playerUrl, detailUrl, allowBrowser) {
-  let stage = 'player-media';
-  try {
-    const playable = extractPlayableURL(await fetchText(ctx, playerUrl, detailUrl || playerUrl, null, 4, 'player-http'));
-    if (playable) return { url: playable, headers: playbackHeaders(playerUrl) };
-  } catch (error) { stage = error.stage || 'player-http'; }
-  if (allowBrowser) {
-    const captured = await extractFromBrowser(playerUrl, detailUrl, ctx, 10);
-    if (captured) return captured;
+    playable = extractPlayableURL(await fetchText(ctx, playerUrl, detailUrl || playerUrl));
+  } catch (error) {
+    playable = '';
   }
-  return { url: '', stage: stage };
+  if (!playable) playable = await extractFromBrowser(playerUrl, detailUrl);
+  return playable;
 }
 
 function parseMasterPlaylist(masterURL, text) {
@@ -516,21 +450,19 @@ function resolveRelativeURL(base, value) {
   return String(base || '').replace(/[?#].*$/, '').replace(/\/[^/]*$/, '/') + value;
 }
 
-async function fetchText(ctx, url, referer, headers, limit, stage) {
-  const seconds = remainingPlaybackSeconds(ctx, limit || 6);
-  const response = await runStage(ctx, stage || 'http', seconds, function () {
-    return httpGet(url, {
-      headers: headers || requestHeaders(referer || url),
-      timeout: seconds, timeoutSeconds: seconds,
-      useBrowserCookie: false, attachBrowserCookie: false,
-      useBrowserFallback: false, browserFallback: false
-    });
+async function fetchText(ctx, url, referer) {
+  const response = await httpGet(url, {
+    headers: requestHeaders(referer || url),
+    useBrowserCookie: false,
+    attachBrowserCookie: false,
+    useBrowserFallback: false,
+    browserFallback: false
   });
   const text = responseText(response);
-  const status = Number(response && (response.status || response.statusCode));
-  if (status >= 400) throw stageError((stage || 'http') + '-' + status, '来源请求失败（HTTP ' + status + '）');
-  if (isVerificationPage(text, status)) throw stageError((stage || 'http') + '-verification', '源站要求浏览器验证');
-  if (!text) throw stageError((stage || 'http') + '-empty', '来源返回空内容');
+  if (!text) throw new Error('请求失败: ' + url);
+  if (isVerificationPage(text, response && (response.status || response.statusCode))) {
+    throw new Error('源站返回了浏览器验证页');
+  }
   return text;
 }
 
@@ -550,54 +482,45 @@ async function httpGet(url, options) {
   throw new Error('当前环境没有可用的 HTTP 客户端');
 }
 
-async function extractFromBrowser(url, referer, ctx, limit) {
-  if (typeof Widget === 'undefined' || !Widget.browser || typeof Widget.browser.fetch !== 'function') return null;
-  const seconds = playbackBrowserSeconds(ctx, limit || 10, 1);
+async function extractFromBrowser(url, referer) {
+  if (typeof Widget === 'undefined' || !Widget.browser || typeof Widget.browser.fetch !== 'function') return '';
   try {
-    const result = await runStage(ctx, 'browser-media', seconds, function () {
-      return Widget.browser.fetch(url, {
-        visible: false, timeout: seconds, timeoutSeconds: seconds,
-        waitAfterLoad: 1, waitForMediaSource: true,
-        headers: requestHeaders(referer || url)
-      });
+    const result = await Widget.browser.fetch(url, {
+      visible: false,
+      timeout: 70,
+      waitAfterLoad: 4,
+      waitForAny: true,
+      waitForMediaSource: true,
+      headers: requestHeaders(referer || url)
     });
-    const captured = firstPlayableInBrowserResult(result);
-    if (captured) return captured;
-    const link = extractPlayableURL(responseText(result)) || extractPlayableURL(result && result.html);
-    if (link) return { url: link, headers: { 'User-Agent': JAVGG_UA } };
-    const keys = Object.keys(result || {}).slice(0, 12).join(',');
-    const blobOnly = /blob:https?:/.test(JSON.stringify((result && (result.mediaSources || result.capturedRequests || result.mediaRequests)) || []));
-    throw stageError(blobOnly ? 'browser-blob-only' : 'browser-no-media', '浏览器未回传可用媒体；blobOnly=' + blobOnly + '；keys=' + keys);
+    return firstPlayableInBrowserResult(result) ||
+      extractPlayableURL(responseText(result)) ||
+      extractPlayableURL(result && result.html);
   } catch (error) {
-    throw stageError(error.stage || 'browser-media', error.stage ? error.message.replace(/；stage=.*$/, '') : '浏览器媒体捕获失败');
+    return '';
   }
 }
 
 function firstPlayableInBrowserResult(result) {
-  if (!result) return null;
-  const arrays = [result.capturedRequests, result.mediaRequests, result.requests, result.responses, result.mediaSources, result.urls, [result]];
+  if (!result) return '';
+  const keys = ['url', 'mediaURL', 'mediaUrl', 'videoURL', 'videoUrl', 'playURL', 'playUrl', 'src'];
+  for (let i = 0; i < keys.length; i += 1) {
+    if (isPlayableURL(result[keys[i]])) return result[keys[i]];
+  }
+  const arrays = [result.mediaSources, result.mediaRequests, result.requests, result.responses, result.urls];
   for (let a = 0; a < arrays.length; a += 1) {
     if (!Array.isArray(arrays[a])) continue;
     for (let i = 0; i < arrays[a].length; i += 1) {
       const item = arrays[a][i];
-      const url = typeof item === 'string' ? item : firstNonEmpty(item && item.url, item && item.src, item && item.responseURL, item && item.mediaURL, item && item.mediaUrl, item && item.videoURL, item && item.videoUrl, item && item.playURL, item && item.playUrl);
-      if (isPlayableURL(url)) return { url: url, headers: capturedHeaders(item && (item.requestHeaders || item.headers)) };
+      const value = typeof item === 'string' ? item : firstNonEmpty(item && item.url, item && item.src, item && item.responseURL);
+      if (isPlayableURL(value) && !/^blob:/i.test(value)) return value;
     }
   }
-  return null;
-}
-
-function capturedHeaders(input) {
-  const headers = { 'User-Agent': JAVGG_UA };
-  if (input && typeof input === 'object') Object.keys(input).forEach(function (key) {
-    const canonical = { 'user-agent': 'User-Agent', referer: 'Referer', origin: 'Origin', cookie: 'Cookie' }[key.toLowerCase()];
-    if (canonical) headers[canonical] = String(input[key]);
-  });
-  return headers;
+  return '';
 }
 
 function extractPlayableURL(value) {
-  const text = htmlDecode(responseText(value) + '\n' + unpackPlayerScripts(responseText(value)).join('\n')).replace(/\\\//g, '/');
+  let text = htmlDecode(responseText(value)).replace(/\\\//g, '/');
   const patterns = [
     /(?:urlPlay|file|src)\s*[:=]\s*["'](https?:\/\/[^"']+\.(?:m3u8|mp4)(?:\?[^"']*)?)/i,
     /(https?:\/\/[^\s"'<>\\]+\.(?:m3u8|mp4)(?:\?[^\s"'<>\\]*)?)/i
@@ -607,35 +530,6 @@ function extractPlayableURL(value) {
     if (match && isPlayableURL(match[1])) return match[1];
   }
   return '';
-}
-
-// Decode the public Dean Edwards packing format as data; never execute source scripts.
-function unpackPlayerScripts(value) {
-  const text = String(value || '').slice(0, 500000);
-  const pattern = /eval\(function\(p,a,c,k,e,[dr]\)[\s\S]*?\(\s*'((?:\\.|[^'\\])*)'\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*'((?:\\.|[^'\\])*)'\.split\('\|'\)/g;
-  const output = [];
-  let match;
-  while (output.length < 4 && (match = pattern.exec(text))) {
-    const radix = Number(match[2]), count = Number(match[3]);
-    if (radix < 2 || radix > 62 || count < 1 || count > 2000 || match[1].length > 100000) continue;
-    const words = decodePackedString(match[4]).split('|');
-    const dictionary = Object.create(null);
-    for (let index = 0; index < count; index += 1) if (words[index]) dictionary[baseEncode(index, radix)] = words[index];
-    output.push(decodePackedString(match[1]).replace(/\b[0-9a-zA-Z]+\b/g, function (token) { return dictionary[token] || token; }));
-  }
-  return output;
-}
-
-function decodePackedString(text) {
-  return String(text || '').replace(/\\(['"\\])/g, '$1').replace(/\\x([0-9a-f]{2})|\\u([0-9a-f]{4})/gi, function (_, x, u) { return String.fromCharCode(parseInt(x || u, 16)); });
-}
-
-function baseEncode(number, radix) {
-  const alphabet = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
-  if (!number) return '0';
-  let token = '';
-  while (number > 0) { token = alphabet[number % radix] + token; number = Math.floor(number / radix); }
-  return token;
 }
 
 function requestHeaders(referer) {
@@ -651,13 +545,11 @@ function imageHeaders(referer) {
 }
 
 function playbackHeaders(playerUrl) {
-  const headers = { 'User-Agent': JAVGG_UA };
-  // Observed on luluvdoo master, variant and segment requests (not the detail-page URL).
-  if (/^https:\/\/luluvdoo\.com(?:\/|$)/i.test(String(playerUrl))) {
-    headers.Referer = 'https://luluvdoo.com/';
-    headers.Origin = 'https://luluvdoo.com';
-  }
-  return headers;
+  return {
+    'User-Agent': JAVGG_UA,
+    Referer: playerUrl,
+    Origin: originOf(playerUrl)
+  };
 }
 
 function baseURL(ctx) {
@@ -754,7 +646,7 @@ function responseText(response) {
 
 function isVerificationPage(html, status) {
   const text = String(html || '').slice(0, 30000);
-  return Number(status) === 403 || /Just a moment|Checking (?:your )?browser|cf-browser-verification|cf-chl-/i.test(text);
+  return Number(status) === 403 || /Just a moment|Checking your browser|cf-browser-verification|cf-chl-/i.test(text);
 }
 
 function absoluteURL(ctx, value) {
@@ -913,54 +805,3 @@ if (typeof globalThis !== 'undefined') {
   Object.keys(exported).forEach(function (key) { globalThis[key] = exported[key]; });
 }
 if (typeof module !== 'undefined' && module.exports) module.exports = exported;
-
-function stageError(stage, message) {
-  const error = new Error(message + '；stage=' + stage);
-  error.stage = stage;
-  return error;
-}
-
-async function runStage(ctx, stage, seconds, operation) {
-  const budget = ctx && ctx.__playbackBudget;
-  if (budget && budget.expired) throw stageError('total-deadline', '解析超时');
-  let timer;
-  try {
-    const timeout = new Promise(function (_, reject) {
-      timer = setTimeout(function () { reject(stageError(stage + '-timeout', '来源请求超时')); }, seconds * 1000);
-    });
-    return await Promise.race([Promise.resolve().then(operation), timeout]);
-  } finally { clearTimeout(timer); }
-}
-
-async function withPlaybackBudget(input, operation, label) {
-  const ctx = Object.assign({}, normalizeContext(input));
-  const budget = { endAt: Date.now() + 28000, expired: false, browserCalls: 0 };
-  ctx.__playbackBudget = budget;
-  let timer;
-  try {
-    const timeout = new Promise(function (_, reject) {
-      timer = setTimeout(function () { budget.expired = true; reject(stageError('total-deadline', (label || '播放解析') + '超时；请稍后重试')); }, 28000);
-    });
-    return await Promise.race([Promise.resolve().then(function () { return operation(ctx); }), timeout]);
-  } finally { clearTimeout(timer); budget.expired = true; }
-}
-
-function remainingPlaybackSeconds(ctx, limit) {
-  const budget = ctx && ctx.__playbackBudget;
-  if (!budget) return limit;
-  const remaining = (budget.endAt - Date.now()) / 1000;
-  if (budget.expired || remaining <= 0) throw new Error('播放解析超时；stage=total-deadline');
-  return Math.max(0.1, Math.min(limit, remaining));
-}
-
-function playbackBrowserSeconds(ctx, limit, maxCalls) {
-  const timeout = remainingPlaybackSeconds(ctx, limit);
-  const budget = ctx && ctx.__playbackBudget;
-  if (budget && budget.browserCalls >= maxCalls) throw new Error('浏览器回退次数已用完；stage=browser-fallback-limit');
-  if (budget) budget.browserCalls++;
-  return timeout;
-}
-
-async function resolvePlayback(input) {
-  return withPlaybackBudget(input, resolvePlaybackWithinBudget);
-}
