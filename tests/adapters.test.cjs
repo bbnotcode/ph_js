@@ -13,6 +13,15 @@ function load(file, additions = {}) {
   return context;
 }
 function plain(value) { return JSON.parse(JSON.stringify(value)); }
+function acceleratedTimers(scale) {
+  const realStart = Date.now();
+  let logicalNow = realStart;
+  const now = () => Math.max(logicalNow, realStart + (Date.now() - realStart) * scale);
+  return { setTimeout: (fn, ms) => {
+    const due = now() + ms;
+    return setTimeout(() => { logicalNow = Math.max(logicalNow, due); fn(); }, ms / scale);
+  }, Date: class extends Date { static now() { return now(); } } };
+}
 const master = '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=2000000,RESOLUTION=1920x1080\n1080.m3u8\n#EXT-X-STREAM-INF:BANDWIDTH=900000,RESOLUTION=1280x720\n720.m3u8\n';
 const media = '#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXTINF:4,\nsegment.ts\n';
 
@@ -355,6 +364,23 @@ test('JAVGG manual-quality flags support JSON and nested parameter shapes', () =
   assert.equal(c.manualQualityEnabled({}),false);
 });
 
+for (const mode of ['synchronous', 'microtask']) {
+  test(`JAVGG ignores premature ${mode} timers without falsely rejecting playback`, async () => {
+    let callbacks=0;
+    const c=load('javgg-mini-library.js',{setTimeout:fn=>{
+      callbacks++;if(mode==='synchronous') fn();else queueMicrotask(fn);return callbacks;
+    },clearTimeout(){}});
+    c.Widget.http.get=async url=>{
+      await new Promise(resolve=>setTimeout(resolve,5));
+      if(url.includes('/jav/')) return {status:200,data:javggDetail(['SW'])};
+      return {status:200,data:url.includes('player1')?packedJavgg():master};
+    };
+    const result=await c.resolvePlayback({detailUrl:'https://javgg.net/jav/a/'});
+    assert.equal(result.url,'https://cdn.test/1080.m3u8');assert.equal(callbacks,4);
+    assert.equal((await c.getResourceVersions({detailUrl:'https://javgg.net/jav/a/'})).length,1);
+  });
+}
+
 test('JAVGG default direct play prefers SW without probing unrelated servers', async () => {
   const c=load('javgg-mini-library.js');const requests=[];
   c.Widget.http.get=async url=>{
@@ -381,7 +407,7 @@ test('JAVGG saved VH server action refreshes renamed host and resolves highest q
 });
 
 test('JAVGG default server-list and playback calls retain overall deadlines', async () => {
-  const c=load('javgg-mini-library.js',{setTimeout:fn=>setTimeout(fn,15)});
+  const c=load('javgg-mini-library.js',acceleratedTimers(1000));
   c.getServerVersions=async()=>new Promise(()=>{});
   await assert.rejects(c.getResourceVersions({}),/线路加载超时.*total-deadline/);
   c.resolvePlaybackWithinBudget=async()=>new Promise(()=>{});
@@ -399,7 +425,7 @@ test('JAVGG maps real server labels to numbered frames, despite missing/reordere
 });
 
 test('JAVGG discovers packed HLS qualities while hung and empty players fail independently', async () => {
-  const c = load('javgg-mini-library.js', { setTimeout: (fn, ms) => setTimeout(fn, ms / 100) });
+  const c = load('javgg-mini-library.js', acceleratedTimers(100));
   let active = 0, max = 0, browsers = 0;
   c.Widget.browser = { async fetch() { browsers++; throw new Error('should not be needed'); } };
   c.Widget.http.get = async url => {
@@ -465,7 +491,7 @@ test('JAVGG captures real browser request headers once, then resolves a lower qu
 });
 
 test('JAVGG bounds a hung native browser and identifies capture failure without exposing tokens', async () => {
-  const c=load('javgg-mini-library.js',{setTimeout:(fn,ms)=>setTimeout(fn,ms/100)});let browsers=0;
+  const c=load('javgg-mini-library.js',acceleratedTimers(100));let browsers=0;
   c.Widget.http.get=async url=>({status:200,data:url.includes('/jav/')?javggDetail(): '<html>dynamic</html>'});
   c.Widget.browser={async fetch(){browsers++;return new Promise(()=>{});}};
   const start=Date.now();await assert.rejects(c.getResourceVersions({detailUrl:'https://javgg.net/jav/a/',params:{manualQuality:true}}),/browser-media-timeout/);
@@ -475,7 +501,7 @@ test('JAVGG bounds a hung native browser and identifies capture failure without 
 });
 
 test('JAVGG quality discovery itself has an overall deadline', async () => {
-  const c=load('javgg-mini-library.js',{setTimeout:fn=>setTimeout(fn,15)});
+  const c=load('javgg-mini-library.js',acceleratedTimers(1000));
   c.discoverResourceVersions=async()=>new Promise(()=>{});
   await assert.rejects(c.getResourceVersions({params:{manualQuality:true}}),/画质发现超时.*total-deadline/);
 });
@@ -509,7 +535,7 @@ test('JAVGG uses observed luluvdoo headers and does not invent headers for other
 test('JAVGG current release keeps imported identity, parameters and the historical restoration record', () => {
   const c = load('javgg-mini-library.js');
   assert.equal(c.getManifest().id, 'javgg-mini-library');
-  assert.equal(c.getManifest().version, '1.0.7');
+  assert.equal(c.getManifest().version, '1.0.8');
   assert.deepEqual(plain(c.getManifest().parameters.map(x => x.name)), ['baseUrl','manualQuality']);
   assert.equal(c.getManifest().parameters.find(x => x.name === 'manualQuality').defaultValue, false);
   assert.equal(restoration.supersededFiles['javgg-mini-library.js'].replacementVersion, '1.0.4');
@@ -555,7 +581,7 @@ test('JAVGG playback awaits asynchronous response bodies while list HTTP stays s
   assert.match(result.url,/720\.m3u8$/);assert.equal(result.container,'m3u8');
 });
 test('JAVGG a hanging HTTP body times out and permits only one captured-media fallback', async () => {
-  const c=load('javgg-mini-library.js',{setTimeout:(fn,ms)=>setTimeout(fn,ms/100)});let browser=0;
+  const c=load('javgg-mini-library.js',acceleratedTimers(100));let browser=0;
   c.Widget.http.get=async url=>url.includes('player.test') ? {text(){return new Promise(()=>{});}} : {data:media};
   c.Widget.browser={async fetch(url,options){browser++;assert.ok(options.timeoutSeconds<=10);assert.equal(options.waitForAny,undefined);
     return {capturedRequests:[{url:'https://cdn.test/fresh.m3u8',requestHeaders:{Referer:'https://player.test/'}}]};}};
@@ -564,7 +590,7 @@ test('JAVGG a hanging HTTP body times out and permits only one captured-media fa
   assert.equal(result.headers.Referer,'https://player.test/');
 });
 test('JAVGG a hanging browser body fails within its capture stage', async () => {
-  const c=load('javgg-mini-library.js',{setTimeout:(fn,ms)=>setTimeout(fn,ms/100)});let browser=0;
+  const c=load('javgg-mini-library.js',acceleratedTimers(100));let browser=0;
   c.Widget.http.get=async()=>({data:'<html>dynamic player</html>'});
   c.Widget.browser={async fetch(){browser++;return {text(){return new Promise(()=>{});}};}};
   await assert.rejects(c.resolvePlayback({versionId:c.encodePayload({playerUrl:'https://player.test/e/abc'})}),/stage=browser-media-timeout/);

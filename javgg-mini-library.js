@@ -9,7 +9,7 @@ const WidgetMetadata = {
   id: 'javgg-mini-library',
   name: 'JAVGG',
   title: 'JAVGG',
-  version: '1.0.7',
+  version: '1.0.8',
   requiredVersion: '0.0.1',
   author: 'Alan huang',
   site: JAVGG_DEFAULT_BASE,
@@ -997,9 +997,15 @@ async function runStage(ctx, stage, seconds, operation) {
   const budget = ctx && ctx.__playbackBudget;
   if (budget && budget.expired) throw stageError('total-deadline', '解析超时');
   let timer;
+  const startedAt = Date.now();
   try {
     const timeout = new Promise(function (_, reject) {
-      timer = setTimeout(function () { reject(stageError(stage + '-timeout', '来源请求超时')); }, seconds * 1000);
+      timer = setTimeout(function () {
+        // Some host timer bridges invoke callbacks before the requested delay.
+        // Do not turn an early callback into a false network timeout.
+        if (Date.now() - startedAt + 5 < seconds * 1000) return;
+        reject(stageError(stage + '-timeout', '来源请求超时'));
+      }, seconds * 1000);
     });
     return await Promise.race([Promise.resolve().then(operation), timeout]);
   } finally { clearTimeout(timer); }
@@ -1012,7 +1018,11 @@ async function withPlaybackBudget(input, operation, label) {
   let timer;
   try {
     const timeout = new Promise(function (_, reject) {
-      timer = setTimeout(function () { budget.expired = true; reject(stageError('total-deadline', (label || '播放解析') + '超时；请稍后重试')); }, 28000);
+      timer = setTimeout(function () {
+        if (Date.now() + 5 < budget.endAt) return;
+        budget.expired = true;
+        reject(stageError('total-deadline', (label || '播放解析') + '超时；请稍后重试'));
+      }, 28000);
     });
     return await Promise.race([Promise.resolve().then(function () { return operation(ctx); }), timeout]);
   } finally { clearTimeout(timer); budget.expired = true; }
