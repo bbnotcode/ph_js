@@ -2,7 +2,7 @@
  * ASMRLIB - Dreamby / baiPlay 自定义媒体库
  * Source: https://asmrlib.com/
  * @author Alan huang
- * @version 1.2.0
+ * @version 1.2.3
  */
 
 const ASMRLIB_BASE = 'https://asmrlib.com';
@@ -89,16 +89,17 @@ function asmrResponseText(response) {
   return '';
 }
 
-async function asmrHTTP(url, referer) {
+async function asmrHTTP(url, referer, seconds) {
   const headers = asmrHeaders(referer);
+  const timeout = seconds || 30;
   let response;
   if (typeof Widget !== 'undefined' && Widget.http) {
-    if (typeof Widget.http.get === 'function') response = await Widget.http.get(url, { headers: headers, timeout: 30 });
-    else if (typeof Widget.http.request === 'function') response = await Widget.http.request({ url: url, method: 'GET', headers: headers, timeout: 30 });
+    if (typeof Widget.http.get === 'function') response = await Widget.http.get(url, { headers: headers, timeout: timeout });
+    else if (typeof Widget.http.request === 'function') response = await Widget.http.request({ url: url, method: 'GET', headers: headers, timeout: timeout });
   }
   if (response === undefined && typeof $http !== 'undefined' && $http) {
-    if (typeof $http.get === 'function') response = await $http.get(url, { headers: headers, timeout: 30 });
-    else if (typeof $http.request === 'function') response = await $http.request({ url: url, method: 'GET', headers: headers, timeout: 30 });
+    if (typeof $http.get === 'function') response = await $http.get(url, { headers: headers, timeout: timeout });
+    else if (typeof $http.request === 'function') response = await $http.request({ url: url, method: 'GET', headers: headers, timeout: timeout });
   }
   if (response === undefined && typeof fetch === 'function') {
     const nativeResponse = await fetch(url, { headers: headers });
@@ -112,7 +113,7 @@ async function asmrHTTP(url, referer) {
 
 function asmrId(raw) {
   const value = asmrText(raw);
-  const match = value.match(/(?:asmrlib:\/\/post\/|\/posts\/)([a-f0-9]{32})/i);
+  const match = value.match(/(?:asmrlib(?:-page)?:\/\/post\/|\/posts\/)([a-f0-9]{32})/i);
   return match ? match[1] : (/^[a-f0-9]{32}$/i.test(value) ? value : '');
 }
 function asmrPayload(id) { return 'asmrlib://post/' + asmrId(id); }
@@ -191,12 +192,15 @@ function getManifest() {
     id: 'asmrlib',
     name: 'ASMRLIB',
     title: 'ASMRLIB',
-    version: '1.2.0',
+    version: '1.2.3',
     author: 'Alan huang',
     logo: ASMRLIB_LOGO,
     icon: ASMRLIB_LOGO,
     capabilities: { search: true, aggregation: true, playbackHistory: true },
-    aggregation: { search: true, playbackHistory: true }
+    aggregation: { search: true, playbackHistory: true },
+    parameters: [
+      { name: 'browserVisible', title: '允许显示播放验证页', type: 'boolean', value: true }
+    ]
   };
 }
 
@@ -290,6 +294,18 @@ function asmrDetailData(html, id) {
 }
 
 function asmrResourceGroups(detail) {
+  // BI requires a user gesture; AB must retain the original iframe parent.
+  // The page owns line selection; don't promise independently resolved lines.
+  if (detail.versions.length && detail.versions.every(function (version) {
+    return /https?:\/\/(?:bysetayico\.com|abyssplayer\.com)\//i.test(version.playerUrl);
+  })) {
+    const pageId = 'asmrlib-page://post/' + detail.id;
+    return [{ id: 'online', title: '在线播放', versions: [{
+      id: pageId, name: '验证后捕获播放源', default: true,
+      subtitle: '必要时手动点击播放；捕获成功后返回播放器',
+      action: { type: 'play', itemId: asmrPayload(detail.id), versionId: pageId, title: detail.title }
+    }] }];
+  }
   return [{
     id: 'online',
     title: '在线播放',
@@ -297,7 +313,7 @@ function asmrResourceGroups(detail) {
       const versionId = 'asmrlib-line://' + encodeURIComponent(version.name) + '/' + encodeURIComponent(version.playerUrl);
       return {
         id: versionId, name: version.name + ' 线路',
-        subtitle: index === 0 ? '快速线路 · 播放时实时解析' : '备用线路 · 切换时请稍候',
+        subtitle: '播放时实时解析；失败不会缓存',
         default: index === 0,
         action: { type: 'play', itemId: asmrPayload(detail.id), versionId: versionId, title: detail.title }
       };
@@ -332,24 +348,62 @@ function asmrPlayable(value) {
   return /^https?:\/\//i.test(asmrText(value)) && /\.(?:m3u8|mp4|mpd|m4v|mov|webm)(?:[?#]|$)/i.test(asmrText(value));
 }
 function asmrBrowserMedia(result) {
-  if (!result) return '';
-  const directKeys = ['url', 'mediaURL', 'mediaUrl', 'videoURL', 'videoUrl', 'playURL', 'playUrl', 'src'];
-  for (let i = 0; i < directKeys.length; i += 1) if (asmrPlayable(result[directKeys[i]])) return result[directKeys[i]];
-  const arrays = [result.mediaSources, result.mediaRequests, result.requests, result.responses, result.urls];
-  for (let a = 0; a < arrays.length; a += 1) {
-    if (!Array.isArray(arrays[a])) continue;
-    for (let i = 0; i < arrays[a].length; i += 1) {
-      const entry = arrays[a][i];
-      const value = typeof entry === 'string' ? entry : entry && (entry.url || entry.src || entry.responseURL);
-      if (asmrPlayable(value) && !/^blob:/i.test(value)) return value;
+  return asmrCapturedMedia(result).url;
+}
+function asmrMediaHeaders(headers) {
+  const output = {};
+  const names = { referer: 'Referer', origin: 'Origin', 'user-agent': 'User-Agent', cookie: 'Cookie', authorization: 'Authorization' };
+  Object.keys(headers || {}).forEach(function (key) {
+    if (names[key.toLowerCase()] && typeof headers[key] === 'string') output[names[key.toLowerCase()]] = headers[key];
+  });
+  return output;
+}
+function asmrCapturedMedia(result) {
+  const candidates = [];
+  const seen = [];
+  const add = function (url, headers) {
+    if (asmrPlayable(url) && !/\/(?:ads?|advert|preview|trailer)(?:[\/_.-]|$)/i.test(url)) {
+      candidates.push({ url: asmrDecode(url), headers: asmrMediaHeaders(headers) });
     }
-  }
-  const text = asmrResponseText(result).replace(/\\\//g, '/');
-  const match = text.match(/https?:\/\/[^\s"'<>\\]+\.(?:m3u8|mp4|mpd|m4v|mov|webm)(?:\?[^\s"'<>\\]*)?/i);
-  return match && asmrPlayable(match[0]) ? match[0] : '';
+  };
+  const visit = function (value, depth, inheritedHeaders) {
+    if (!value || depth > 5 || seen.length > 250) return;
+    if (typeof value === 'string') {
+      add(value, inheritedHeaders);
+      if (/^\s*[\[{]/.test(value)) {
+        try { visit(JSON.parse(value), depth + 1, inheritedHeaders); } catch (_) {}
+      }
+      return;
+    }
+    if (typeof value !== 'object' || seen.indexOf(value) >= 0) return;
+    seen.push(value);
+    if (Array.isArray(value)) {
+      value.slice(0, 100).forEach(function (entry) { visit(entry, depth + 1, inheritedHeaders); });
+      return;
+    }
+    const headers = value.requestHeaders || value.mediaHeaders || inheritedHeaders || {};
+    const keys = ['url', 'mediaURL', 'mediaUrl', 'videoURL', 'videoUrl', 'playURL', 'playUrl', 'src', 'responseURL'];
+    keys.forEach(function (key) { add(value[key], headers); });
+    // Request records may use `headers`; response headers must not become native request headers.
+    if (value.headers && !value.status && !value.statusCode && !value.responseHeaders) {
+      keys.forEach(function (key) { add(value[key], value.headers); });
+    }
+    ['mediaSources', 'mediaRequests', 'capturedRequests', 'requests', 'responses', 'urls', 'data', 'body', 'result', 'frames', 'frameResults'].forEach(function (key) {
+      visit(value[key], depth + 1, headers);
+    });
+  };
+  visit(result, 0, null);
+  candidates.sort(function (a, b) {
+    const score = function (entry) { return (/\.m3u8(?:[?#]|$)/i.test(entry.url) ? 10 : 0) + Object.keys(entry.headers).length; };
+    return score(b) - score(a);
+  });
+  // Do not scrape URLs from arbitrary page HTML: those may be ads or stale configs.
+  return candidates[0] || { url: '', headers: {} };
 }
 function asmrVersionPlayerURL(input) {
   const versionId = asmrText(asmrPick(input, ['versionId', 'resourceId', 'lineId'], ''));
+  const page = versionId.match(/^asmrlib-page:\/\/post\/([a-f0-9]{32})$/i);
+  if (page) return ASMRLIB_BASE + '/posts/' + page[1];
   const match = versionId.match(/^asmrlib-line:\/\/[^/]+\/([\s\S]+)$/);
   if (match) {
     try { return decodeURIComponent(match[1]); } catch (_) { return match[1]; }
@@ -385,7 +439,7 @@ async function asmrResolveUP(playerUrl) {
   if (!code) return '';
   const api = 'https://v.upn.one/api/v1/video?id=' + encodeURIComponent(code) +
     '&w=390&h=844&r=' + encodeURIComponent(ASMRLIB_BASE);
-  const encrypted = await asmrHTTP(api, ASMRLIB_BASE + '/');
+  const encrypted = await asmrHTTP(api, ASMRLIB_BASE + '/', 4);
   const data = asmrDecryptUP(encrypted);
   const candidates = [data.source, data.cfNative];
   if (data.hlsVideoTiktok && data.streamingConfig) {
@@ -413,71 +467,85 @@ async function asmrResolveUP(playerUrl) {
 }
 
 async function resolvePlayback(input) {
+  const deadline = Date.now() + 28000;
   const direct = asmrText(asmrPick(input, ['url', 'path', 'playUrl', 'videoUrl'], ''));
-  if (asmrPlayable(direct)) return asmrPlaybackResult(direct, direct);
+  if (asmrPlayable(direct)) return asmrPlaybackResult(direct, asmrMediaHeaders(asmrPick(input, ['headers'], {})));
   let playerUrl = asmrVersionPlayerURL(input);
-  if (!playerUrl) {
-    const detail = await getDetail(input);
-    const version = detail.resourceGroups[0] && detail.resourceGroups[0].versions[0];
-    playerUrl = version ? asmrVersionPlayerURL(version.action) : '';
-  }
-  if (!playerUrl) throw new Error('没有找到 ASMRLIB 播放线路');
-  if (typeof Widget === 'undefined' || !Widget.browser || typeof Widget.browser.fetch !== 'function') {
-    throw new Error('当前 Dreamby 版本不支持设备内播放器解析');
-  }
-  const candidates = [playerUrl];
-  const itemId = asmrId(asmrPick(input, ['itemId', 'id'], ''));
-  let media = '';
-  let resolvedReferer = playerUrl;
-  for (let i = 0; i < 2 && !media; i += 1) {
-    if (!candidates[i] && i === 1 && itemId) {
-      try {
-        const detail = await getDetail({ itemId: asmrPayload(itemId) });
-        const versions = detail.resourceGroups[0] ? detail.resourceGroups[0].versions : [];
-        versions.forEach(function (version) {
-          const alternate = asmrVersionPlayerURL(version.action);
-          if (alternate && candidates.indexOf(alternate) < 0) candidates.push(alternate);
-        });
-      } catch (_) {}
-    }
-    const candidate = candidates[i];
-    if (!candidate) continue;
-    if (asmrUPCode(candidate)) {
-      try {
-        media = await asmrResolveUP(candidate);
-        if (media) {
-          resolvedReferer = candidate;
-          break;
-        }
-      } catch (_) {}
-      continue;
-    }
+  const itemId = asmrId(asmrPick(input, ['itemId', 'id'], '')) ||
+    asmrId(asmrPick(input, ['versionId'], '')) || asmrId(playerUrl);
+  if (!itemId && !playerUrl) throw new Error('缺少 ASMRLIB 内容 ID；请重新打开影片详情');
+  if (asmrUPCode(playerUrl)) {
     try {
-      const result = await Widget.browser.fetch(candidate, {
-        visible: false,
-        timeout: 18,
-        timeoutSeconds: 18,
-        waitAfterLoad: 1.2,
-        waitForAny: true,
-        waitForMediaSource: true,
-        captureRequests: true,
-        captureMedia: true,
-        headers: asmrHeaders(ASMRLIB_BASE + '/')
-      });
-      media = asmrBrowserMedia(result);
-      if (media) resolvedReferer = candidate;
-    } catch (_) {}
+      const media = await asmrBounded('up-api', 4, function () { return asmrResolveUP(playerUrl); });
+      if (media) return asmrPlaybackResult(media, { Referer: playerUrl, 'User-Agent': ASMRLIB_UA });
+    } catch (error) {
+      if (!itemId) throw new Error('旧 UP 线路已无法解析；stage=up-api；请重新打开影片详情');
+    }
   }
-  if (!media) throw new Error('快速线路和备用线路均未捕获到媒体，请稍后重试');
-  return asmrPlaybackResult(media, resolvedReferer);
+  if (typeof Widget === 'undefined' || !Widget.browser || typeof Widget.browser.fetch !== 'function') {
+    throw new Error('当前 Dreamby 未提供设备浏览器；stage=browser-unavailable');
+  }
+  const requiresParent = /https?:\/\/(?:bysetayico\.com|abyssplayer\.com)\//i.test(playerUrl);
+  if (requiresParent && !itemId) throw new Error('当前线路必须在原详情页内打开；请重新进入影片详情；stage=missing-parent');
+  // Both current providers need the original iframe. Cached BI/AB IDs remain usable.
+  const pageURL = itemId ? ASMRLIB_BASE + '/posts/' + itemId : playerUrl;
+  const allowVisible = !/^(?:false|0|no|off)$/i.test(String(asmrPick(input, ['browserVisible'], true)));
+  const attempts = allowVisible ? [false, true] : [false];
+  let diagnosis = 'no-media';
+  let keys = '';
+  for (let i = 0; i < attempts.length; i += 1) {
+    const seconds = Math.min(attempts[i] ? 18 : 8, (deadline - Date.now()) / 1000);
+    if (seconds < 1) break;
+    let result;
+    try {
+      result = await asmrBounded(attempts[i] ? 'visible-capture' : 'hidden-capture', seconds, function () {
+        const options = {
+          visible: attempts[i], timeout: seconds, waitAfterLoad: 1,
+          headers: asmrHeaders(ASMRLIB_BASE + '/')
+        };
+        // Hidden probes return after load; don't wait there for an impossible human gesture.
+        if (attempts[i]) options.waitForMediaSource = true;
+        return Widget.browser.fetch(pageURL, options);
+      });
+    } catch (error) {
+      // A timed-out native browser may still be open; never stack another session.
+      throw error;
+    }
+    const media = asmrCapturedMedia(result);
+    if (media.url) return asmrPlaybackResult(media.url, media.headers);
+    keys = result && typeof result === 'object' ? Object.keys(result).slice(0, 12).join(',') : typeof result;
+    let text = asmrResponseText(result);
+    try { text += JSON.stringify(result || {}); } catch (_) {}
+    diagnosis = /blob:/i.test(text) ? 'blob-only' :
+      (/验证你是真人|verify.{0,30}human|captcha|turnstile/i.test(text) ? 'verification-required' : 'iframe-media-missing');
+  }
+  const reason = diagnosis === 'blob-only' ? '网页只回传了 blob，无法交给原生播放器' :
+    (diagnosis === 'verification-required' ? '播放器仍要求手动验证' : '设备浏览器未回传 iframe 的最终媒体地址');
+  throw new Error('ASMRLIB：' + reason + '；stage=' + diagnosis + '；keys=' + keys +
+    (allowVisible ? '；如果网页已播放，说明当前宿主未暴露可用播放源；失败不会缓存' : '；可启用“允许显示播放验证页”后手动播放'));
 }
 
-function asmrPlaybackResult(url, referer) {
+async function asmrBounded(stage, seconds, operation) {
+  let timer;
+  try {
+    return await Promise.race([
+      Promise.resolve().then(operation),
+      new Promise(function (_, reject) {
+        timer = setTimeout(function () { reject(new Error('ASMRLIB 解析超时；stage=' + stage + '；请先关闭验证页再重试')); }, seconds * 1000);
+      })
+    ]);
+  } catch (error) {
+    if (/^ASMRLIB 解析超时/.test(String(error && error.message))) throw error;
+    // Avoid exposing cookies or signed URLs in native errors.
+    throw new Error('ASMRLIB 浏览器或请求执行失败；stage=' + stage + '；请检查网络和 Dreamby 浏览器组件');
+  } finally { clearTimeout(timer); }
+}
+
+function asmrPlaybackResult(url, capturedHeaders) {
   const container = /\.m3u8(?:[?#]|$)/i.test(url) ? 'm3u8' : (/\.mpd(?:[?#]|$)/i.test(url) ? 'mpd' : 'mp4');
-  const originMatch = asmrText(referer).match(/^(https?:\/\/[^/]+)/i);
   return {
     url: url, container: container,
-    headers: { Referer: referer || ASMRLIB_BASE + '/', Origin: originMatch ? originMatch[1] : ASMRLIB_BASE, 'User-Agent': ASMRLIB_UA },
+    headers: asmrMediaHeaders(capturedHeaders),
     startPositionSeconds: 0, isLive: false, streamKind: container === 'm3u8' ? 'hls' : 'file'
   };
 }

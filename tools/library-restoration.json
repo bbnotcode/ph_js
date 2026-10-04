@@ -10,10 +10,6 @@
       "version": "1.1.7",
       "sha256": "034d60b44eac74e044aa73b244a10004b91a1a28669deb7022a006fc81a4ed31"
     },
-    "asmrlib-mini-library.js": {
-      "version": "1.2.0",
-      "sha256": "2cb404dbbab67626d762248dbe050ab7e534ea68278ff745c5d304b6a487faa0"
-    },
     "madou8-mini-library 5.js": {
       "version": "1.1.0",
       "sha256": "7ea8fc7aec7352e470fc0019f509723dce4e8c5f1a1f05d4ab692bca8f3bb488"
@@ -40,6 +36,12 @@
     }
   },
   "supersededFiles": {
+    "asmrlib-mini-library.js": {
+      "version": "1.2.0",
+      "sha256": "2cb404dbbab67626d762248dbe050ab7e534ea68278ff745c5d304b6a487faa0",
+      "replacementVersion": "1.2.3",
+      "reason": "User requested ASMRLIB playback repair and GitHub test publication on 2026-10-04; capture now retains the original iframe parent and reads capturedRequests; native device playback remains unverified"
+    },
     "javgg-mini-library.js": {
       "version": "1.0.0",
       "sha256": "39092a7afb7107182c33fc923d93cb99c20ea3fb97d01810ef1f4e974de8885e",

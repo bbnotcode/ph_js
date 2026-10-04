@@ -236,7 +236,6 @@ assert.match(restoration.baselineCommit, /^[0-9a-f]{40}$/);
 const restoredIds = {
   'missav-mini-library.js': 'missav-mini-library',
   'sexbjcam-mini-library.js': 'sexbjcam-mini-library',
-  'asmrlib-mini-library.js': 'asmrlib',
   'madou8-mini-library 5.js': 'madou8-mini-library',
   'taolusm-mini-library.js': 'taolusm-mini-library',
   'kbjfan-mini-library.js': 'kbjfan-mini-library',
@@ -279,7 +278,7 @@ test('MissAV pre-task snapshot retains direct HLS playback and its detail identi
   assert.equal(playback.url, 'https://cdn.test/original.m3u8');
   assert.equal(playback.container, 'm3u8'); assert.equal(requests, 0);
 });
-test('ASMRLIB pre-task snapshot retains separate embedded player lines and their version identifiers', async () => {
+test('ASMRLIB current embedded players share the original page and retain old line IDs', async () => {
   const c = load('asmrlib-mini-library.js');
   const post = 'becd2651e7d56ca656d27766d036dcee';
   c.Widget.http.get = async () => ({ data: '<h1>Sample</h1><div id="players"><button data-url="https://bysetayico.com/e/sample">BI</button><button data-url="https://abyssplayer.com/sample">AB</button></div><div id="downloads"></div>' });
@@ -287,9 +286,53 @@ test('ASMRLIB pre-task snapshot retains separate embedded player lines and their
   const groups = await c.getResourceVersions({ itemId: 'asmrlib://post/' + post });
   assert.deepEqual(plain(groups), plain(detail.resourceGroups));
   const versions = groups[0].versions;
-  assert.deepEqual(plain(versions.map(x => x.name)), ['BI 线路', 'AB 线路']);
-  assert.deepEqual(plain(versions.map(x => c.asmrVersionPlayerURL(x.action))), ['https://bysetayico.com/e/sample', 'https://abyssplayer.com/sample']);
-  assert.equal(versions[0].default, true); assert.equal(versions[1].default, false);
+  assert.equal(versions.length, 1);
+  assert.equal(versions[0].name, '验证后捕获播放源');
+  assert.equal(c.asmrVersionPlayerURL(versions[0].action), 'https://asmrlib.com/posts/' + post);
+  assert.equal(versions[0].default, true);
+  assert.equal(c.asmrVersionPlayerURL({versionId: 'asmrlib-line://BI/' + encodeURIComponent('https://bysetayico.com/e/sample')}), 'https://bysetayico.com/e/sample');
+  assert.equal(c.getManifest().version, '1.2.3');
+  assert.equal(restoration.supersededFiles['asmrlib-mini-library.js'].replacementVersion, '1.2.3');
+});
+
+test('ASMRLIB reads capturedRequests and preserves the actual media request headers', async () => {
+  const c = load('asmrlib-mini-library.js'); const calls = []; const post = 'becd2651e7d56ca656d27766d036dcee';
+  c.Widget.browser = { async fetch(url, options) { calls.push({url, options}); return {
+    capturedRequests: [{url: 'https://cdn.test/master.m3u8', requestHeaders: {referer: 'https://abyssplayer.com/', 'user-agent': 'DeviceUA'}}]
+  }; } };
+  const result = await c.resolvePlayback(JSON.stringify({itemId: 'asmrlib://post/' + post, versionId: 'asmrlib-line://AB/' + encodeURIComponent('https://abyssplayer.com/sample')}));
+  assert.equal(result.url, 'https://cdn.test/master.m3u8'); assert.equal(result.headers.Referer, 'https://abyssplayer.com/');
+  assert.equal(result.headers['User-Agent'], 'DeviceUA'); assert.equal(result.headers.Origin, undefined);
+  assert.equal(calls.length, 1); assert.equal(calls[0].url, 'https://asmrlib.com/posts/' + post); assert.equal(calls[0].options.waitForMediaSource, undefined);
+});
+test('ASMRLIB nested JSON capture supports page-version-only playback', async () => {
+  const c = load('asmrlib-mini-library.js'); const post = 'becd2651e7d56ca656d27766d036dcee';
+  c.Widget.browser = {async fetch(){return JSON.stringify({data:{result:{mediaSources:['https://cdn.test/current.mp4']}}});}};
+  const result = await c.resolvePlayback({versionId:'asmrlib-page://post/' + post});
+  assert.equal(result.url,'https://cdn.test/current.mp4'); assert.deepEqual(plain(result.headers),{});
+});
+test('ASMRLIB uses at most one visible capture after a loaded hidden page', async () => {
+  const c = load('asmrlib-mini-library.js'); const calls = [];
+  c.Widget.browser = {async fetch(url,options){calls.push(options);return options.visible ? {mediaSources:['https://cdn.test/current.mp4']} : {html:'点击播放按钮以验证你是真人'};}};
+  await c.resolvePlayback({itemId:'asmrlib://post/becd2651e7d56ca656d27766d036dcee'});
+  assert.equal(calls.length,2); assert.equal(calls[0].visible,false); assert.equal(calls[1].visible,true); assert.equal(calls[1].waitForMediaSource,true);
+});
+test('ASMRLIB rejects blobs and does not scrape ad media from arbitrary HTML', async () => {
+  const c=load('asmrlib-mini-library.js'); let calls=0;
+  c.Widget.browser={async fetch(){calls++;return {mediaSources:['blob:https://player.test/123'],html:'<script>var ad="https://cdn.test/advert.mp4"</script>'};}};
+  await assert.rejects(c.resolvePlayback({itemId:'asmrlib://post/becd2651e7d56ca656d27766d036dcee'}),/stage=blob-only/); assert.equal(calls,2);
+});
+test('ASMRLIB hanging host is bounded and never starts an overlapping fallback', async () => {
+  const c=load('asmrlib-mini-library.js',{setTimeout:fn=>setTimeout(fn,10)});let calls=0;
+  c.Widget.browser={fetch(){calls++;return new Promise(()=>{});}};
+  await assert.rejects(c.resolvePlayback({itemId:'asmrlib://post/becd2651e7d56ca656d27766d036dcee'}),/stage=hidden-capture/);assert.equal(calls,1);
+});
+test('ASMRLIB hidden preference fails explicitly and a later attempt can succeed', async () => {
+  const c=load('asmrlib-mini-library.js');let available=false;const calls=[];
+  c.Widget.browser={async fetch(url,options){calls.push(options);return available?{mediaSources:['https://cdn.test/retry.mp4']}:{html:'点击播放按钮以验证你是真人'};}};
+  const input={itemId:'asmrlib://post/becd2651e7d56ca656d27766d036dcee',params:{browserVisible:false}};
+  await assert.rejects(c.resolvePlayback(input),/stage=verification-required/);assert.equal(calls.length,1);available=true;
+  assert.equal((await c.resolvePlayback(input)).url,'https://cdn.test/retry.mp4');assert.ok(calls.every(x=>x.visible===false));
 });
 test('KBJ pre-task snapshot object search retains the configured domain and page', async () => {
   const c = load('kbjfan-mini-library.js'); const requests = [];
