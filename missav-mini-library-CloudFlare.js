@@ -11,8 +11,8 @@ const WidgetMetadata = {
   id: 'missav-mini-library',
   name: 'MissAV',
   title: 'MissAV',
-  version: '1.0.0',
-  author: 'baiPlay',
+  version: '1.0.7',
+  author: 'alanhuang',
   logo: MISSAV_LOGO,
   icon: MISSAV_LOGO,
   site: MISSAV_DEFAULT_BASE,
@@ -114,18 +114,55 @@ function getManifest() {
         defaultValue: MISSAV_DEFAULT_ENTRY,
         required: true,
         description: '例如 /dm247/cn。MissAV 的 dm 前缀会变化，失效时可替换为当前可访问入口。'
+      },
+      {
+        name: 'backupBaseURLs',
+        title: '备用站点地址',
+        type: 'input',
+        defaultValue: 'https://missav.ai,https://missav123.com',
+        required: false,
+        description: '多个域名用逗号或换行分隔。网络不稳或主域名被拦截时会自动尝试备用域名。'
+      },
+      {
+        name: 'enableBrowserFallback',
+        title: 'Cloudflare 浏览器兜底',
+        type: 'boolean',
+        defaultValue: true,
+        required: false,
+        description: '遇到 Cloudflare 或普通 HTTP 失败时，使用 App 浏览器请求一次并复用浏览器 Cookie。'
+      },
+      {
+        name: 'browserVisible',
+        title: '显示验证窗口',
+        type: 'boolean',
+        defaultValue: false,
+        required: false,
+        description: '默认关闭，避免列表页自动跳出真人验证界面。需要时点击页面里的手动验证卡片。'
+      },
+      {
+        name: 'requestTimeoutSeconds',
+        title: '请求超时秒数',
+        type: 'number',
+        defaultValue: 45,
+        required: false,
+        description: '网络差时可调大到 60-90 秒。'
+      },
+      {
+        name: 'cacheMinutes',
+        title: '页面缓存分钟',
+        type: 'number',
+        defaultValue: 20,
+        required: false,
+        description: '短期缓存首页、分类、详情 HTML，减少重复触发 Cloudflare。'
       }
     ]
   };
 }
 
 async function getHome(ctx) {
-  const html = await safeFetch(entryURL(ctx), baseURL(ctx) + '/');
+  const html = await safeFetch(ctx, entryURL(ctx), baseURL(ctx) + '/');
   const hero = parseCards(sectionBlock(html, '推荐给你'), '推荐给你', ctx).slice(0, 10).map(toWideItem);
-  const parsedSections = parseHomeSections(ctx, html);
-  const mediaSections = parsedSections.length ? parsedSections : MISSAV_SECTIONS.map(function (section) {
-    return sectionShell(ctx, section);
-  });
+  const mediaSections = homeMediaSections(ctx, parseHomeSections(ctx, html));
   const sections = [primaryCategoriesSection(ctx)].concat(mediaSections);
 
   return {
@@ -136,6 +173,22 @@ async function getHome(ctx) {
     hero: hero,
     sections: sections
   };
+}
+
+function homeMediaSections(ctx, parsedSections) {
+  const sections = [];
+  const seen = {};
+  (parsedSections || []).forEach(function (section) {
+    if (!section || !section.id || seen[section.id]) return;
+    seen[section.id] = true;
+    sections.push(section);
+  });
+  MISSAV_SECTIONS.forEach(function (section) {
+    if (seen[section.id]) return;
+    seen[section.id] = true;
+    sections.push(sectionShell(ctx, section));
+  });
+  return sections;
 }
 
 function primaryCategoriesSection(ctx) {
@@ -172,8 +225,9 @@ function categoryCard(ctx, category) {
 async function getHomeSection(ctx) {
   const sectionId = stringValue(ctx && (ctx.sectionId || ctx.id));
   const section = findSection(sectionId) || MISSAV_SECTIONS[0];
+  const url = categoryURL(ctx, section.path);
   try {
-    const html = await fetchText(ctx, categoryURL(ctx, section.path));
+    const html = await fetchText(ctx, url, entryURL(ctx));
     return {
       id: section.id,
       title: section.title,
@@ -183,7 +237,7 @@ async function getHomeSection(ctx) {
       items: parseCards(html, section.title, ctx).slice(0, 18)
     };
   } catch (error) {
-    return emptySection(section.id, section.title, section.style, error);
+    return verificationSection(ctx, section.id, section.title, section.style, url, error);
   }
 }
 
@@ -194,7 +248,12 @@ async function getCategory(ctx) {
   const primary = findPrimaryCategory(pageId);
   const path = section ? section.path : primary ? primary.path : pageId;
   const url = pagedURL(categoryURL(ctx, path), page);
-  const html = await fetchText(ctx, url);
+  let html = '';
+  try {
+    html = await fetchText(ctx, url, entryURL(ctx));
+  } catch (error) {
+    return verificationCategory(ctx, pageId, section ? section.title : primary ? primary.title : '需要验证', url, error, page);
+  }
   const title = section ? section.title : primary ? primary.title : pageTitle(html) || 'MissAV';
   const items = parseCards(html, title, ctx);
   const categoryItems = items.length ? [] : parseCategoryCards(ctx, html, title);
@@ -215,7 +274,12 @@ async function getDetail(ctx) {
   const detailURL = detailUrlFromContext(ctx);
   if (!detailURL) throw new Error('MissAV 详情参数无效');
 
-  const html = await fetchText(ctx, detailURL);
+  let html = '';
+  try {
+    html = await fetchText(ctx, detailURL, entryURL(ctx));
+  } catch (error) {
+    return verificationDetail(ctx, detailURL, error);
+  }
   const fallbackTitle = titleFromUrl(detailURL);
   const title = cleanText(
     firstNonEmpty(
@@ -313,7 +377,7 @@ async function getResourceVersions(ctx) {
   const direct = playUrlFromContext(ctx);
   if (direct) return playbackGroups(detailURL, title, direct, ctx);
   try {
-    const html = await fetchText(ctx, detailURL);
+    const html = await fetchText(ctx, detailURL, entryURL(ctx));
     return playbackGroups(detailURL, title, extractPlayableURL(html), ctx);
   } catch (error) {
     return playbackGroups(detailURL, title, '', ctx);
@@ -328,7 +392,7 @@ async function resolvePlayback(ctx) {
 
   const detailURL = detailUrlFromContext(ctx);
   if (!detailURL) throw new Error('MissAV 播放参数无效');
-  const html = await fetchText(ctx, detailURL);
+  const html = await fetchText(ctx, detailURL, entryURL(ctx));
   const url = firstNonEmpty(
     extractPlayableURL(html),
     await extractPlayableFromLinkedPlayers(ctx, html, detailURL),
@@ -390,7 +454,18 @@ async function search(ctx) {
   if (!query) return { pageType: 'search', title: '搜索结果', items: [] };
   const page = positiveInt(contextValue(ctx, 'page'), 1);
   const url = pagedURL(categoryURL(ctx, '/search/' + encodeURIComponent(query.replace(/\\/g, ''))), page);
-  const html = await fetchText(ctx, url);
+  let html = '';
+  try {
+    html = await fetchText(ctx, url, entryURL(ctx));
+  } catch (error) {
+    return {
+      pageType: 'search',
+      title: '搜索结果',
+      items: [verificationCard(ctx, '需要真人验证', url, error)],
+      page: page,
+      hasMore: false
+    };
+  }
   const items = parseCards(html, query, ctx);
   return {
     pageType: 'search',
@@ -416,11 +491,24 @@ async function matchResources(ctx) {
   return { results: (results.items || []).slice(0, 8) };
 }
 
+async function onAction(ctx) {
+  const name = stringValue(ctx && (ctx.name || ctx.action || ctx.id));
+  const payload = (ctx && ctx.payload) || ctx || {};
+  if (name !== 'verifyCloudflare') return { handled: false };
+  const url = stringValue(payload.url || ctx.url) || entryURL(ctx);
+  const html = await browserHTML(ctx, url, url, true);
+  return {
+    handled: true,
+    ok: isUsableHTML(html),
+    message: isUsableHTML(html) ? '验证完成，可以返回刷新当前页面。' : '验证没有完成，请确认页面已加载并通过真人验证。'
+  };
+}
+
 async function extractPlayableFromLinkedPlayers(ctx, html, referer) {
   const urls = extractPlayerURLs(ctx, html, referer);
   for (let index = 0; index < urls.length; index += 1) {
     try {
-      const playerHTML = await fetchText(ctx, urls[index]);
+      const playerHTML = await fetchText(ctx, urls[index], referer);
       const playable = extractPlayableURL(playerHTML);
       if (playable) return playable;
     } catch (error) {
@@ -501,30 +589,65 @@ function pagedURL(url, page) {
   return url + (url.indexOf('?') >= 0 ? '&' : '?') + 'page=' + page;
 }
 
-async function fetchText(ctx, url) {
-  const response = await httpGet(url, {
-    headers: requestHeaders(ctx, url),
-    useBrowserCookie: true,
-    attachBrowserCookie: true,
-    useBrowserFallback: true,
-    browserFallback: true,
-    allowBrowserFallback: true
-  });
-  const text = responseText(response);
-  if (isCloudflare(text, response && response.status, response && response.headers)) {
-    const browserText = await browserHTML(url, url);
-    if (browserText && !isCloudflare(browserText)) return browserText;
-    throw new Error('MissAV 启用了 Cloudflare 浏览器校验，当前 HTTP 环境无法直接读取页面。');
+async function fetchText(ctx, url, referer) {
+  const cached = getCachedText(ctx, url);
+  if (cached) return cached;
+
+  const urls = candidateURLs(ctx, url);
+  let lastError = null;
+  for (let index = 0; index < urls.length; index += 1) {
+    const currentURL = urls[index];
+    const requestReferer = referer || entryURL(ctx);
+    try {
+      const response = await httpGet(currentURL, requestOptions(ctx, requestReferer));
+      const text = responseText(response);
+      if (isUsableHTML(text, response && response.status, response && response.headers)) {
+        setCachedText(ctx, currentURL, text);
+        if (currentURL !== url) setCachedText(ctx, url, text);
+        return text;
+      }
+      if (isCloudflare(text, response && response.status, response && response.headers)) {
+        const browserText = await browserHTML(ctx, currentURL, requestReferer);
+        if (isUsableHTML(browserText)) {
+          setCachedText(ctx, currentURL, browserText);
+          if (currentURL !== url) setCachedText(ctx, url, browserText);
+          return browserText;
+        }
+      }
+      lastError = new Error('HTTP ' + (response && response.status ? response.status : 'empty') + ' ' + currentURL);
+    } catch (error) {
+      lastError = error;
+      const browserText = await browserHTML(ctx, currentURL, requestReferer);
+      if (isUsableHTML(browserText)) {
+        setCachedText(ctx, currentURL, browserText);
+        if (currentURL !== url) setCachedText(ctx, url, browserText);
+        return browserText;
+      }
+    }
   }
-  return text;
+  throw new Error('MissAV 页面读取失败，可能是 Cloudflare 验证、网络超时或当前域名不可达。可点击“手动完成验证”，或在“备用站点地址”里填写当前能打开的域名。' + (lastError && lastError.message ? ' 原因：' + lastError.message : ''));
 }
 
-async function safeFetch(url, referer) {
+async function safeFetch(ctx, url, referer) {
   try {
-    return await fetchText({ baseURL: originOf(url), entryPath: pathOf(url) }, url, referer);
+    return await fetchText(ctx || { baseURL: originOf(url), entryPath: pathOf(url) }, url, referer);
   } catch (error) {
     return '';
   }
+}
+
+function requestOptions(ctx, referer) {
+  const timeout = numberParam(ctx, 'requestTimeoutSeconds', 45);
+  return {
+    headers: requestHeaders(ctx, referer),
+    timeout: timeout,
+    timeoutSeconds: timeout,
+    useBrowserCookie: true,
+    attachBrowserCookie: true,
+    useBrowserFallback: boolParam(ctx, 'enableBrowserFallback', true),
+    browserFallback: boolParam(ctx, 'enableBrowserFallback', true),
+    allowBrowserFallback: boolParam(ctx, 'enableBrowserFallback', true)
+  };
 }
 
 function httpGet(url, options) {
@@ -570,13 +693,16 @@ function responseText(response) {
   return String(response.data || response.body || '');
 }
 
-async function browserHTML(url, referer) {
+async function browserHTML(ctx, url, referer, forceVisible) {
+  if (!boolParam(ctx, 'enableBrowserFallback', true)) return '';
   if (typeof Widget === 'undefined' || !Widget.browser || typeof Widget.browser.fetch !== 'function') return '';
   try {
+    const timeout = numberParam(ctx, 'requestTimeoutSeconds', 45);
     const result = await Widget.browser.fetch(url, {
-      visible: false,
-      timeout: 60,
-      waitAfterLoad: 2.5,
+      visible: forceVisible === true ? true : boolParam(ctx, 'browserVisible', false),
+      timeout: timeout,
+      timeoutSeconds: timeout,
+      waitAfterLoad: 4,
       waitForAny: true,
       waitForMediaSource: true,
       headers: {
@@ -614,6 +740,134 @@ async function extractFromBrowser(url, referer) {
   }
 }
 
+function candidateURLs(ctx, url) {
+  const input = stringValue(url);
+  const urls = [input];
+  const origin = originOf(input);
+  const path = input.replace(/^https?:\/\/[^/]+/i, '');
+  candidatePathVariants(ctx, path).forEach(function (variant) {
+    const next = origin + variant;
+    if (urls.indexOf(next) < 0) urls.push(next);
+  });
+  backupBaseURLs(ctx).forEach(function (base) {
+    const root = base.replace(/\/+$/, '');
+    if (!root || root === origin) return;
+    candidatePathVariants(ctx, path).forEach(function (variant) {
+      const next = root + variant;
+      if (urls.indexOf(next) < 0) urls.push(next);
+    });
+  });
+  return urls.filter(Boolean);
+}
+
+function candidatePathVariants(ctx, path) {
+  const value = path && path[0] === '/' ? path : '/' + stringValue(path);
+  const variants = [value];
+  if (!isKnownCategoryPath(value)) return variants;
+  const match = value.match(/^\/(?:dm\d+\/)?cn(\/[^?#]*)([?#].*)?$/i);
+  if (match) {
+    const suffix = match[1] || '';
+    const query = match[2] || '';
+    const cnPath = '/cn' + suffix + query;
+    const rootPath = suffix + query;
+    if (variants.indexOf(cnPath) < 0) variants.push(cnPath);
+    if (variants.indexOf(rootPath) < 0) variants.push(rootPath);
+  } else {
+    const localePath = localePrefix(ctx) + value;
+    const cnPath = '/cn' + value;
+    if (variants.indexOf(localePath) < 0) variants.push(localePath);
+    if (variants.indexOf(cnPath) < 0) variants.push(cnPath);
+  }
+  return variants;
+}
+
+function isKnownCategoryPath(path) {
+  const clean = String(path || '').split(/[?#]/)[0].replace(/^\/(?:dm\d+\/)?cn/i, '') || '/';
+  return MISSAV_SECTIONS.concat(MISSAV_PRIMARY_CATEGORIES).some(function (item) {
+    return clean === item.path || clean === item.path.split('?')[0];
+  });
+}
+
+function backupBaseURLs(ctx) {
+  const raw = stringValue(contextValue(ctx, 'backupBaseURLs') || contextValue(ctx, 'backupBaseUrls') || contextValue(ctx, 'backup_base_urls'));
+  return raw.split(/[\n,，\s]+/).map(function (value) {
+    return value.replace(/\/+$/, '');
+  }).filter(function (value) {
+    return /^https?:\/\//i.test(value);
+  });
+}
+
+function cacheKey(url) {
+  return 'missav:html:' + String(url || '');
+}
+
+function memoryCache() {
+  if (typeof globalThis === 'undefined') return {};
+  if (!globalThis.__MISSAV_HTML_CACHE__) globalThis.__MISSAV_HTML_CACHE__ = {};
+  return globalThis.__MISSAV_HTML_CACHE__;
+}
+
+function getCachedText(ctx, url) {
+  const ttl = numberParam(ctx, 'cacheMinutes', 20) * 60 * 1000;
+  if (ttl <= 0) return '';
+  const key = cacheKey(url);
+  const now = Date.now();
+  const memory = memoryCache()[key];
+  if (memory && memory.expiresAt > now && memory.text) return memory.text;
+  const stored = cacheGet(key);
+  if (stored && stored.expiresAt > now && stored.text) return stored.text;
+  return '';
+}
+
+function setCachedText(ctx, url, text) {
+  if (!isUsableHTML(text)) return;
+  const ttl = numberParam(ctx, 'cacheMinutes', 20) * 60 * 1000;
+  if (ttl <= 0) return;
+  const value = { text: text, expiresAt: Date.now() + ttl };
+  const key = cacheKey(url);
+  memoryCache()[key] = value;
+  cacheSet(key, value);
+}
+
+function cacheGet(key) {
+  try {
+    if (typeof Widget !== 'undefined' && Widget.cache && typeof Widget.cache.get === 'function') return Widget.cache.get(key);
+    if (typeof $cache !== 'undefined' && typeof $cache.get === 'function') return $cache.get(key);
+  } catch (error) {
+    return null;
+  }
+  return null;
+}
+
+function cacheSet(key, value) {
+  try {
+    if (typeof Widget !== 'undefined' && Widget.cache && typeof Widget.cache.set === 'function') Widget.cache.set(key, value);
+    if (typeof $cache !== 'undefined' && typeof $cache.set === 'function') $cache.set(key, value);
+  } catch (error) {
+    // Cache is opportunistic; ignore unsupported host APIs.
+  }
+}
+
+function isUsableHTML(html, status, headers) {
+  const text = String(html || '');
+  if (!text || text.length < 80) return false;
+  if (Number(status) >= 400) return false;
+  if (isCloudflare(text, status, headers)) return false;
+  return /<html|<body|<a\b|<video\b|m3u8|mp4/i.test(text);
+}
+
+function boolParam(ctx, key, fallback) {
+  const value = contextValue(ctx, key);
+  if (value === undefined || value === null || value === '') return fallback;
+  if (typeof value === 'boolean') return value;
+  return !/^(false|0|no|off|否|关闭)$/i.test(String(value).trim());
+}
+
+function numberParam(ctx, key, fallback) {
+  const value = Number(contextValue(ctx, key));
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
 function playableFromBrowserResult(result) {
   if (!result) return '';
   const keys = ['url', 'mediaURL', 'mediaUrl', 'videoURL', 'videoUrl', 'playURL', 'playUrl', 'src'];
@@ -645,7 +899,7 @@ function parseHomeSections(ctx, html) {
     const predefined = findSection(title);
     sections.push({
       id: predefined ? predefined.id : 'missav-home-' + index,
-      title: title,
+      title: predefined ? predefined.title : title,
       style: predefined ? predefined.style : sectionStyle(title),
       moreAction: predefined ? categoryAction(ctx, predefined) : undefined,
       items: items
@@ -681,6 +935,68 @@ function emptySection(id, title, style, error) {
         action: { type: 'category', pageId: id, title: title }
       }
     ]
+  };
+}
+
+function verificationCategory(ctx, id, title, url, error, page) {
+  return {
+    pageType: 'category',
+    id: id,
+    title: title || '需要验证',
+    style: 'media.posterGrid',
+    itemAspectRatio: '16:9',
+    items: [verificationCard(ctx, '需要真人验证', url, error)],
+    page: page || 1,
+    hasMore: false
+  };
+}
+
+function verificationSection(ctx, id, title, style, url, error) {
+  return {
+    id: id,
+    title: title,
+    style: style || 'discover.posterCompact',
+    lazy: false,
+    items: [verificationCard(ctx, '需要真人验证', url, error)]
+  };
+}
+
+function verificationDetail(ctx, url, error) {
+  const title = titleFromUrl(url) || '需要真人验证';
+  return {
+    pageType: 'detail',
+    id: makeItemId(url, title, ''),
+    title: title,
+    type: 'movie',
+    overview: cleanText(error && error.message) || '站点触发了 Cloudflare 真人验证。请返回列表页点击手动验证卡片，完成后刷新。',
+    detailImageAspectRatio: '16:9',
+    resourceGroups: playbackGroups(url, title, '', ctx),
+    recommendations: [
+      {
+        id: 'verify',
+        title: '访问受限',
+        style: 'discover.posterCompact',
+        items: [verificationCard(ctx, '手动完成验证', url, error)]
+      }
+    ]
+  };
+}
+
+function verificationCard(ctx, title, url, error) {
+  return {
+    id: 'verify-cloudflare-' + encodeURIComponent(url || entryURL(ctx)).slice(0, 120),
+    title: title || '手动完成验证',
+    subtitle: '点击后再打开验证界面，完成后返回刷新',
+    overview: cleanText(error && error.message) || '当前网络触发了 Cloudflare 真人验证。',
+    type: 'collection',
+    aspectRatio: '16:9',
+    action: {
+      type: 'custom',
+      name: 'verifyCloudflare',
+      id: 'verifyCloudflare',
+      title: '手动完成验证',
+      payload: { url: url || entryURL(ctx) }
+    }
   };
 }
 
@@ -1390,9 +1706,12 @@ function isDetailPageURL(url) {
 function isCloudflare(html, status, headers) {
   const text = String(html || '') + ' ' + JSON.stringify(headers || {});
   return Number(status) === 403 ||
+    Number(status) === 429 ||
+    Number(status) === 503 ||
     /<title>\s*Just a moment/i.test(text) ||
+    /Checking your browser|Verifying you are human|Verify you are human|Ray ID/i.test(text) ||
     /Enable JavaScript and cookies to continue/i.test(text) ||
-    /cf-mitigated|cf-browser-verification/i.test(text);
+    /cf-mitigated|cf-browser-verification|cf-chl-|challenge-platform|turnstile/i.test(text);
 }
 
 function decodeEscapes(value) {
@@ -1505,6 +1824,7 @@ const MissAVMiniLibrary = {
   search: search,
   onSearch: onSearch,
   getSearch: getSearch,
+  onAction: onAction,
   matchResources: matchResources,
   matchMovie: matchResources
 };
@@ -1528,6 +1848,7 @@ if (typeof globalThis !== 'undefined') {
   globalThis.search = search;
   globalThis.onSearch = onSearch;
   globalThis.getSearch = getSearch;
+  globalThis.onAction = onAction;
   globalThis.matchResources = matchResources;
   globalThis.matchMovie = matchResources;
   globalThis.__jsEvalReturn = __jsEvalReturn;
