@@ -43,8 +43,8 @@
     "javgg-mini-library.js": {
       "version": "1.0.0",
       "sha256": "39092a7afb7107182c33fc923d93cb99c20ea3fb97d01810ef1f4e974de8885e",
-      "replacementVersion": "1.0.3",
-      "reason": "User requested home and category loading repair on 2026-10-04"
+      "replacementVersion": "1.0.4",
+      "reason": "User supplied the working 1.0.0 list implementation, rejected 1.0.3 list changes, and requested playback-only repair on 2026-10-04; local source file remains unchanged"
     }
   }
 }

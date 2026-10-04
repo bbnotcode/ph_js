@@ -4,7 +4,17 @@
 
 已经导入 DreamBy 的入口继续使用原来的下载地址和媒体库 ID。每个下载入口都包含完整 JavaScript，不需要远程加载器。
 
-## JAVGG 1.0.3：首页与分类加载修复 — 2026-10-04
+## JAVGG 1.0.4：使用用户正常显示的版本修复播放 — 2026-10-04
+
+用户确认提供的本地 1.0.0 文件可以正常显示，而上次 1.0.3 的列表改动仍失败。此次以这份文件为基础，在独立目录修复并发布；用户本地文件保持原样。首页、分区、分类、搜索、详情和原 HTTP 读取等 22 个相关函数与用户文件逐字相同，撤回 1.0.3 的列表回退改动。原文件路径、媒体库 ID、参数及 `javgg://` 历史载荷保留。
+
+播放部分读取公开播放器的打包配置，不执行远程脚本；按编号对应真实 server 名和 iframe，避免多个线路都叫 `Server` 或缺失 iframe 后错位。五条当前线路的静态解析最多三路并行，每个播放器/清单请求最多 4 秒，包含异步正文；仅在需要时做一次短网页媒体捕获。画质发现和播放各有 28 秒总截止时间，撤掉逐条最多 70 秒的等待。只返回来源真实画质，默认最高，切换/重开时重新读取播放地址；失败保留具体阶段，不生成虚假的可播放资源。媒体请求头沿用实际来源观察和宿主回传。
+
+75 项媒体库回归、60 个脚本语法、39 个库契约、兼容路径、既有网络测试与发布包装通过。三部真实详情结构配合匿名播放器/清单请求，分别在约 4.5–4.7 秒发现可用画质。streamwish 的 1080p → 480p → 1080p → 重开四次探测均为清单 HTTP 200、分片范围 HTTP 206（188 字节，MPEG-TS 同步字节有效）；使用 resolver 返回的请求头，每次重新读取播放器地址。详情结构来自当前浏览器会话，不能称为隔离匿名详情验证。部分播放器有超时或无效清单，会独立失败。DreamBy iPhone 的媒体回传、实际起播和切画质仍需用户更新测试。
+
+其余九个已恢复下载入口继续与任务前快照一致。请沿用 [JAVGG 原 raw 地址](https://raw.githubusercontent.com/bbnotcode/ph_js/main/javgg-mini-library.js)，确认导入版本为 1.0.4。
+
+## JAVGG 1.0.3 列表修复历史（用户设备未通过，列表改动已撤回）
 
 用户在 iPhone DreamBy 中报告首页及各分类显示站点 Logo 的失败卡，错误为 `stage=http-timeout`。JAVGG 原版列表请求禁用浏览器回退，HTTP 失败后直接返回错误卡。此次仅修列表读取和失败显示：普通 HTTP 最多 6 秒，包含正文读取；失败或收到验证/不完整页面时，最多一次 12 秒隐藏网页 HTML 回退，不等待视频媒体。正常 HTTP 列表不打开浏览器，可使用宿主提供的正常浏览器会话；不提取或保存 Cookie。
 
@@ -25,14 +35,14 @@
 | [MissAV download-working](missav-mini-library-download-working.js) / [working 6](missav-mini-library-download-working%206.js) | 1.5.9 |
 | [SexBJCam](sexbjcam-mini-library.js) | 1.1.7 |
 | [ASMRLIB](asmrlib-mini-library.js) | 1.2.0 |
-| [JAVGG](javgg-mini-library.js) | 1.0.3（随后按用户要求修复列表加载） |
+| [JAVGG](javgg-mini-library.js) | 1.0.4（基于用户正常显示的 1.0.0 修复播放） |
 | [麻豆亚洲版](madou8-mini-library%205.js) | 1.1.0 |
 | [套路 SM](taolusm-mini-library.js) | 1.0.0 |
 | [KBJ fan](kbjfan-mini-library.js) | 1.0.0 |
 
 每个文件均恢复该时间点的原始内容、版本号和参数，原 raw 地址与库 ID 保留。MissAV 普通版和 CloudFlare 版虽然版本号相同，内容和参数不同，分别保留；只有内容相同的两个 download-working 文件继续同步。
 
-时间截止点、基线提交及历史文件 SHA-256 记录在 [tools/library-restoration.json](tools/library-restoration.json)。JAVGG 的旧快照移入 `supersededFiles` 并标明此后按用户要求更新到 1.0.3；其余九个入口继续校验历史内容。恢复检查校验每个路径的历史内容、真实 manifest、原版公共入口和对应版本行为。此前恢复最早上传版的操作已更正，下文播放修复为撤回的历史记录。
+时间截止点、基线提交及历史文件 SHA-256 记录在 [tools/library-restoration.json](tools/library-restoration.json)。JAVGG 的旧快照移入 `supersededFiles` 并标明此次基于用户文件更新到 1.0.4；其余九个入口继续校验历史内容。恢复检查校验每个路径的历史内容、真实 manifest、原版公共入口和对应版本行为。此前恢复最早上传版的操作已更正，下文旧版播放修复为历史记录。
 
 ## 主维护文件与兼容入口
 
