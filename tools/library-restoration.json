@@ -39,8 +39,8 @@
     "asmrlib-mini-library.js": {
       "version": "1.2.0",
       "sha256": "2cb404dbbab67626d762248dbe050ab7e534ea68278ff745c5d304b6a487faa0",
-      "replacementVersion": "1.2.4",
-      "reason": "User reported hidden-capture timeout after GitHub test publication on 2026-10-04; default capture now opens the original iframe parent visibly once without a hidden prerequisite; native device playback remains unverified"
+      "replacementVersion": "1.2.5",
+      "reason": "User confirmed AB webpage playback while BI waits for encoding; expose AB default and BI backup using the site's public server-choice preference cookie while retaining the original iframe parent; native device playback remains unverified"
     },
     "javgg-mini-library.js": {
       "version": "1.0.0",

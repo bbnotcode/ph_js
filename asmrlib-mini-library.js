@@ -2,7 +2,7 @@
  * ASMRLIB - Dreamby / baiPlay 自定义媒体库
  * Source: https://asmrlib.com/
  * @author Alan huang
- * @version 1.2.4
+ * @version 1.2.5
  */
 
 const ASMRLIB_BASE = 'https://asmrlib.com';
@@ -192,7 +192,7 @@ function getManifest() {
     id: 'asmrlib',
     name: 'ASMRLIB',
     title: 'ASMRLIB',
-    version: '1.2.4',
+    version: '1.2.5',
     author: 'Alan huang',
     logo: ASMRLIB_LOGO,
     icon: ASMRLIB_LOGO,
@@ -294,26 +294,22 @@ function asmrDetailData(html, id) {
 }
 
 function asmrResourceGroups(detail) {
-  // BI requires a user gesture; AB must retain the original iframe parent.
-  // The page owns line selection; don't promise independently resolved lines.
-  if (detail.versions.length && detail.versions.every(function (version) {
-    return /https?:\/\/(?:bysetayico\.com|abyssplayer\.com)\//i.test(version.playerUrl);
-  })) {
-    const pageId = 'asmrlib-page://post/' + detail.id;
-    return [{ id: 'online', title: '在线播放', versions: [{
-      id: pageId, name: '验证后捕获播放源', default: true,
-      subtitle: '必要时手动点击播放；捕获成功后返回播放器',
-      action: { type: 'play', itemId: asmrPayload(detail.id), versionId: pageId, title: detail.title }
-    }] }];
-  }
+  // Separate selectable lines, still embedded in the original post at playback.
+  const versions = detail.versions.slice().sort(function (a, b) {
+    return Number(/https?:\/\/abyssplayer\.com\//i.test(b.playerUrl)) -
+      Number(/https?:\/\/abyssplayer\.com\//i.test(a.playerUrl));
+  });
   return [{
     id: 'online',
     title: '在线播放',
-    versions: detail.versions.map(function (version, index) {
+    versions: versions.map(function (version, index) {
       const versionId = 'asmrlib-line://' + encodeURIComponent(version.name) + '/' + encodeURIComponent(version.playerUrl);
       return {
         id: versionId, name: version.name + ' 线路',
-        subtitle: '播放时实时解析；失败不会缓存',
+        subtitle: /https?:\/\/abyssplayer\.com\//i.test(version.playerUrl) ?
+          '优先线路；必要时手动播放，捕获成功后返回播放器' :
+          (/https?:\/\/bysetayico\.com\//i.test(version.playerUrl) ?
+            '备用线路；如提示等待转码，请改选 AB' : '播放时实时解析；失败不会缓存'),
         default: index === 0,
         action: { type: 'play', itemId: asmrPayload(detail.id), versionId: versionId, title: detail.title }
       };
@@ -466,6 +462,33 @@ async function asmrResolveUP(playerUrl) {
   throw new Error('UP 播放 API没有返回可播放地址');
 }
 
+async function asmrLineCookie(line, referer) {
+  // Use the site's public preference endpoint; never forge/decrypt its cookie.
+  const url = ASMRLIB_BASE + '/server/choose/' + line;
+  const options = { headers: asmrHeaders(referer), timeout: 4 };
+  let response;
+  const client = typeof Widget !== 'undefined' && Widget.http ? Widget.http :
+    (typeof $http !== 'undefined' ? $http : null);
+  if (client && typeof client.get === 'function') response = await client.get(url, options);
+  else if (client && typeof client.request === 'function') response = await client.request({ url: url, method: 'GET', headers: options.headers, timeout: 4 });
+  else if (typeof fetch === 'function') response = await fetch(url, options);
+  const status = response && (response.status || response.statusCode);
+  const body = response && typeof response.text === 'function' ? await response.text() : asmrResponseText(response);
+  if ((status && status >= 400) || body.trim() !== 'ok') {
+    throw new Error('ASMRLIB 线路选择失败；stage=line-selection；请稍后重试');
+  }
+  const headers = response.headers || response.header || response.responseHeaders || {};
+  let raw = '';
+  if (typeof headers.get === 'function') raw = headers.get('set-cookie') || '';
+  else Object.keys(headers).forEach(function (key) { if (key.toLowerCase() === 'set-cookie') raw = headers[key]; });
+  const cookie = (Array.isArray(raw) ? raw.join(',') : String(raw)).match(/(?:^|[,\r\n])\s*(playerServer=[^;,\s]+)/);
+  if (!cookie || cookie[1].length > 4096) {
+    throw new Error('ASMRLIB 宿主未返回线路偏好 Cookie；stage=line-selection-cookie；无法保证选中 ' + (line === 'abyss' ? 'AB' : 'BI'));
+  }
+  // Only forward playerServer to the original site page, not session/auth cookies.
+  return cookie[1];
+}
+
 async function resolvePlayback(input) {
   const deadline = Date.now() + 28000;
   const direct = asmrText(asmrPick(input, ['url', 'path', 'playUrl', 'videoUrl'], ''));
@@ -489,6 +512,12 @@ async function resolvePlayback(input) {
   if (requiresParent && !itemId) throw new Error('当前线路必须在原详情页内打开；请重新进入影片详情；stage=missing-parent');
   // Both current providers need the original iframe. Cached BI/AB IDs remain usable.
   const pageURL = itemId ? ASMRLIB_BASE + '/posts/' + itemId : playerUrl;
+  const line = /https?:\/\/bysetayico\.com\//i.test(playerUrl) ? 'byse' :
+    (/https?:\/\/abyssplayer\.com\//i.test(playerUrl) || (itemId && (!playerUrl || asmrId(playerUrl))) ? 'abyss' : '');
+  const pageHeaders = asmrHeaders(ASMRLIB_BASE + '/');
+  if (line) {
+    pageHeaders.Cookie = await asmrBounded('line-selection', 4, function () { return asmrLineCookie(line, pageURL); });
+  }
   const allowVisible = !/^(?:false|0|no|off)$/i.test(String(asmrPick(input, ['browserVisible'], true)));
   // These players need a real user gesture. A hidden load may hang before
   // verification opens, so use exactly one visible capture by default.
@@ -503,7 +532,7 @@ async function resolvePlayback(input) {
       result = await asmrBounded(attempts[i] ? 'visible-capture' : 'hidden-capture', seconds, function () {
         const options = {
           visible: attempts[i], timeout: seconds, waitAfterLoad: 1,
-          headers: asmrHeaders(ASMRLIB_BASE + '/')
+          headers: pageHeaders
         };
         // Explicit hidden opt-out does not wait for an impossible human gesture.
         if (attempts[i]) options.waitForMediaSource = true;
@@ -518,10 +547,10 @@ async function resolvePlayback(input) {
     keys = result && typeof result === 'object' ? Object.keys(result).slice(0, 12).join(',') : typeof result;
     let text = asmrResponseText(result);
     try { text += JSON.stringify(result || {}); } catch (_) {}
-    diagnosis = /blob:/i.test(text) ? 'blob-only' :
+    diagnosis = /Waiting for available encoder|Processing is still in progress/i.test(text) ? 'source-processing' : /blob:/i.test(text) ? 'blob-only' :
       (/验证你是真人|verify.{0,30}human|captcha|turnstile/i.test(text) ? 'verification-required' : 'iframe-media-missing');
   }
-  const reason = diagnosis === 'blob-only' ? '网页只回传了 blob，无法交给原生播放器' :
+  const reason = diagnosis === 'source-processing' ? '当前源仍在等待转码；请改选另一线路或稍后重试' : diagnosis === 'blob-only' ? '网页只回传了 blob，无法交给原生播放器' :
     (diagnosis === 'verification-required' ? '播放器仍要求手动验证' : '设备浏览器未回传 iframe 的最终媒体地址');
   throw new Error('ASMRLIB：' + reason + '；stage=' + diagnosis + '；keys=' + keys +
     (allowVisible ? '；如果网页已播放，说明当前宿主未暴露可用播放源；失败不会缓存' : '；可启用“允许显示播放验证页”后手动播放'));
@@ -537,7 +566,7 @@ async function asmrBounded(stage, seconds, operation) {
       })
     ]);
   } catch (error) {
-    if (/^ASMRLIB 解析超时/.test(String(error && error.message))) throw error;
+    if (/^ASMRLIB (?:解析超时|线路选择失败|宿主未返回线路偏好)/.test(String(error && error.message))) throw error;
     // Avoid exposing cookies or signed URLs in native errors.
     throw new Error('ASMRLIB 浏览器或请求执行失败；stage=' + stage + '；请检查网络和 Dreamby 浏览器组件');
   } finally { clearTimeout(timer); }

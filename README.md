@@ -4,13 +4,13 @@
 
 已经导入 DreamBy 的入口继续使用原来的下载地址和媒体库 ID。每个下载入口都包含完整 JavaScript，不需要远程加载器。
 
-## ASMRLIB 1.2.4 隐藏探测超时修复测试版 — 2026-10-04
+## ASMRLIB 1.2.5 AB 优先与线路切换测试版 — 2026-10-04
 
-旧解析器独立隐藏打开 BI/AB 播放器，并遗漏宿主返回的 `capturedRequests`。当前三部真实样本均只有 BI/AB；BI 显示真人验证按钮，AB 公开代码在独立页面打开时跳走。1.2.3 保留原影片详情页和 iframe，提供“验证后捕获播放源”入口，兼容旧影片/线路标识。首页、分类、搜索与详情解析相关 23 个函数保持原样。
+用户确认所报影片的 BI 线路在等待编码，而 AB 网页可以播放；1.2.5 将资源入口拆为“AB 线路”和“BI 线路”，AB 默认优先，BI 可手动选择为备用。播放前请求站点公开的 `/server/choose/abyss` 或 `/server/choose/byse`，读取站点实际签发的 `playerServer` 偏好 Cookie，仅用于原影片页请求，不转交会话 Cookie、不伪造或解密偏好值、不自动点击真人验证。三部实站样本验证该 Cookie 可以选择正确 iframe；DreamBy 设备是否接受页面 Cookie 和回传媒体仍待测试。兼容旧影片、线路及合并页面标识。首页、分类、搜索与详情解析相关 23 个函数保持原样。
 
-用户设备反馈 1.2.3 在 `stage=hidden-capture` 超时，尚未进入可见验证。1.2.4 默认直接打开原影片验证页，只进行一次可见媒体捕获；必要时由用户手动点击播放，不再先做隐藏探测。请保持“允许显示播放验证页”开启；明确关闭时仍只尝试一次短隐藏捕获。支持有界嵌套/JSON 返回值与捕获媒体的实际请求头，只有最终媒体地址才交给原生播放器。blob-only、验证要求、iframe 无媒体、宿主异常与超时分别报告；失败不缓存，可见捕获最多 18 秒，总脚本截止时间 28 秒。脚本不能强制取消仍在运行的宿主浏览器。
+沿用 1.2.4 的一次可见捕获，不再先隐藏加载播放器；必要时由用户手动点击播放。请保持“允许显示播放验证页”开启；明确关闭时仍只尝试一次短隐藏捕获。新增的线路偏好请求是普通 HTTP，最多 4 秒；如果宿主不返回偏好 Cookie，明确报 `stage=line-selection-cookie`，不假装已选 AB。可见捕获最多 18 秒，总截止时间 28 秒。返回的网页内容如出现编码排队则报 `stage=source-processing`；失败不缓存，超时后不叠加浏览器会话。只有最终媒体地址才交给原生播放器，网页播放本身不是成功回传的证明。
 
-[导入 1.2.4 测试版（沿用原测试链接）](https://raw.githubusercontent.com/bbnotcode/ph_js/codex/asmrlib-1.2.3-test-20261004/asmrlib-mini-library.js)。语法、模拟宿主和三部真实详情入口已验证；DreamBy 设备浏览器媒体回传和 iPhone 原生起播待用户测试。此次保留库 ID `asmrlib`，其他媒体库文件不变。测试分支基于已通过完整检查的主分支提交 `1e59aaaaa68431db6467a689bcb485dfb49ceb1e`；最新主分支的 JAVGG 1.0.6 存在七项与此次 ASMRLIB 无关的既有测试失败，未在本任务内修改。
+[导入 1.2.5 测试版（沿用原测试链接）](https://raw.githubusercontent.com/bbnotcode/ph_js/codex/asmrlib-1.2.3-test-20261004/asmrlib-mini-library.js)。83 项模拟回归通过；DreamBy 设备浏览器媒体回传和 iPhone 原生起播待用户测试。此次保留库 ID `asmrlib`，其他媒体库文件不变。测试分支基于已通过完整检查的主分支提交 `1e59aaaaa68431db6467a689bcb485dfb49ceb1e`；最新主分支的 JAVGG 1.0.6 存在七项与此次 ASMRLIB 无关的既有测试失败，未在本任务内修改。
 
 ## JAVGG 1.0.4：使用用户正常显示的版本修复播放 — 2026-10-04
 
@@ -42,7 +42,7 @@
 | [MissAV CloudFlare 版](missav-mini-library-CloudFlare.js) | 1.0.7 |
 | [MissAV download-working](missav-mini-library-download-working.js) / [working 6](missav-mini-library-download-working%206.js) | 1.5.9 |
 | [SexBJCam](sexbjcam-mini-library.js) | 1.1.7 |
-| [ASMRLIB](asmrlib-mini-library.js) | 1.2.4（播放捕获测试版） |
+| [ASMRLIB](asmrlib-mini-library.js) | 1.2.5（AB 优先测试版） |
 | [JAVGG](javgg-mini-library.js) | 1.0.4（基于用户正常显示的 1.0.0 修复播放） |
 | [麻豆亚洲版](madou8-mini-library%205.js) | 1.1.0 |
 | [套路 SM](taolusm-mini-library.js) | 1.0.0 |
